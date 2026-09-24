@@ -1,0 +1,191 @@
+[
+  {
+    "id": "node_01_chapel",
+    "title": "Chapel of St. Francis",
+    "subtitle": "The Western Transept",
+    "latitude": 37.774929,
+    "longitude": -122.419416,
+    "radiusMeters": 10,
+    "description": "A tranquil stone sanctuary bathed in azure light from high arched stained glass windows. Dedicated to the patron saint of creation.",
+    "clueHint": "Look for where the golden sunlight casts cobalt blue rays onto the stone floor.",
+    "category": "chapel",
+    "iconName": "sun",
+    "puzzle": {
+      "type": "mcq",
+      "question": "Saint Francis of Assisi wrote a famous hymn praising creation. What is the celestial body he affectionately called 'Brother'?",
+      "options": [
+        { "id": "a", "text": "Brother Wind", "isCorrect": false, "feedback": "Close! Wind is honored, but the primary celestial light is Brother Sun." },
+        { "id": "b", "text": "Brother Sun", "isCorrect": true, "feedback": "Spot on! In the Canticle of the Sun, he praises God for Sir Brother Sun." },
+        { "id": "c", "text": "Brother Ocean", "isCorrect": false, "feedback": "Francis celebrated Sister Water, but the celestial brother was the Sun." },
+        { "id": "d", "text": "Brother Mountain", "isCorrect": false, "feedback": "Nature is cherished, but the sun took top praise." }
+      ],
+      "scriptureRef": "Canticle of the Creatures (1224 AD)",
+      "funFact": "St. Francis is known for staging the very first live Nativity scene in Greccio, Italy in 1223!"
+    },
+    "reward": {
+      "xp": 150,
+      "badgeId": "badge_first_step",
+      "badgeTitle": "The Awakening Pilgrim",
+      "badgeIcon": "compass",
+      "itemId": "item_azure_shard",
+      "itemTitle": "Azure Glass Shard",
+      "itemDescription": "A fragment of stained glass that glimmers with radiant cobalt energy.",
+      "itemRarity": "common"
+    }
+  },
+  {
+    "id": "node_02_cloister",
+    "title": "The Ancient Cloister",
+    "subtitle": "Courtyard Arcades",
+    "latitude": 37.775140,
+    "longitude": -122.419200,
+    "radiusMeters": 8,
+    "description": "An open stone quadrangle surrounded by covered walkways where monks once walked in silent reflection.",
+    "clueHint": "Find the quiet quadrangle surrounded by stone arches and a central olive tree.",
+    "category": "courtyard",
+    "iconName": "trees",
+    "puzzle": {
+      "type": "unscramble",
+      "scrambledLetters": ["C", "T", "S", "A", "U", "N", "R", "A", "Y"],
+      "solutionWord": "SANCTUARY",
+      "hintPhrase": "A place of safety, holiness, and refuge from the world.",
+      "funFact": "In medieval times, anyone who reached a church sanctuary was granted legal protection from arrest!"
+    },
+    "reward": {
+      "xp": 200,
+      "badgeId": "badge_cryptographer",
+      "badgeTitle": "Cipher Novice",
+      "badgeIcon": "key",
+      "itemId": "item_parchment_leaf",
+      "itemTitle": "Illuminated Parchment",
+      "itemDescription": "Hand-inked script inscribed with ancient monastic wisdom.",
+      "itemRarity": "rare"
+    }
+  },
+  {
+    "id": "node_03_belltower",
+    "title": "The Grand Bell Tower",
+    "subtitle": "The Campanile",
+    "latitude": 37.775350,
+    "longitude": -122.419520,
+    "radiusMeters": 10,
+    "description": "Towering 90 feet above the church roof, housing five bronze bells cast over a century ago.",
+    "clueHint": "Look up to the tallest stone summit whose bells strike the hour.",
+    "category": "history",
+    "iconName": "bell",
+    "puzzle": {
+      "type": "mcq",
+      "question": "What is the specialized musical art of playing tuned church bells using a hand-lever keyboard called?",
+      "options": [
+        { "id": "a", "text": "Carillon", "isCorrect": true, "feedback": "Correct! A carillon is an instrument of at least 23 cast bronze bells." },
+        { "id": "b", "text": "Clavier", "isCorrect": false, "feedback": "Clavier usually refers to a piano or harpsichord keyboard." },
+        { "id": "c", "text": "Cantata", "isCorrect": false, "feedback": "A cantata is a vocal composition with instrumental accompaniment." },
+        { "id": "d", "text": "Crescendo", "isCorrect": false, "feedback": "Crescendo is a gradual increase in volume." }
+      ],
+      "scriptureRef": "Psalm 150:5 - 'Praise Him with sounding cymbals'",
+      "funFact": "The heaviest bell in this tower weighs over 3,200 pounds and is named 'Gabriel'!"
+    },
+    "reward": {
+      "xp": 250,
+      "badgeId": "badge_sentinel",
+      "badgeTitle": "Tower Sentinel",
+      "badgeIcon": "shield",
+      "itemId": "item_bronze_key",
+      "itemTitle": "Bronze Belfry Key",
+      "itemDescription": "An ornate heavy key that unlocks the narrow staircase to the bell loft.",
+      "itemRarity": "rare"
+    }
+  },
+  {
+    "id": "node_04_gethsemane",
+    "title": "Garden of Gethsemane",
+    "subtitle": "The Olive Grove Walk",
+    "latitude": 37.774780,
+    "longitude": -122.419120,
+    "radiusMeters": 10,
+    "description": "A peaceful memorial garden planted with rosemary, lavender, and ancient olive shrubs.",
+    "clueHint": "Follow the fragrance of sweet lavender toward the stone bench beneath the olive branches.",
+    "category": "scripture",
+    "iconName": "flower",
+    "puzzle": {
+      "type": "unscramble",
+      "scrambledLetters": ["L", "V", "I", "I", "G"],
+      "solutionWord": "VIGIL",
+      "hintPhrase": "A period of keeping awake during the time usually spent sleeping, especially to pray.",
+      "funFact": "Some olive trees in the actual Garden of Gethsemane in Jerusalem have roots dated over 900 years old!"
+    },
+    "reward": {
+      "xp": 200,
+      "badgeId": "badge_watchman",
+      "badgeTitle": "Silent Watchman",
+      "badgeIcon": "eye",
+      "itemId": "item_olive_branch_pin",
+      "itemTitle": "Silver Olive Branch Pin",
+      "itemDescription": "A gleaming silver clasp symbolizing lasting peace and endurance.",
+      "itemRarity": "epic"
+    }
+  },
+  {
+    "id": "node_05_altar",
+    "title": "The High Altar Mosaic",
+    "subtitle": "Heart of the Nave",
+    "latitude": 37.775050,
+    "longitude": -122.419350,
+    "radiusMeters": 7,
+    "description": "The sacred center of the cathedral featuring a breathtaking gold leaf Byzantine mosaic of Christ the Teacher.",
+    "clueHint": "Walk down the main central nave aisle toward the grand gilded arch.",
+    "category": "secret",
+    "iconName": "sparkles",
+    "puzzle": {
+      "type": "camera_qr",
+      "targetLandmarkName": "The Golden Mosaic Arch",
+      "qrExpectedValue": "FAITH_QUEST_ALTAR_APEX",
+      "hintPhrase": "Aim your camera at the mosaic medallion above the altar, or scan the holy seal placed on the lectern.",
+      "funFact": "Over 45,000 tiny hand-cut Venetian glass tiles (tesserae) were laid to create this mosaic!"
+    },
+    "reward": {
+      "xp": 350,
+      "badgeId": "badge_holy_architect",
+      "badgeTitle": "Master of Light",
+      "badgeIcon": "award",
+      "itemId": "item_golden_thurible",
+      "itemTitle": "Golden Thurible Relic",
+      "itemDescription": "A miniature ceremonial incense vessel that shines with pure gold luster.",
+      "itemRarity": "legendary"
+    }
+  },
+  {
+    "id": "node_06_crypt",
+    "title": "The Crypt & Historical Archive",
+    "subtitle": "Lower Vault Chambers",
+    "latitude": 37.774880,
+    "longitude": -122.419580,
+    "radiusMeters": 8,
+    "description": "Subterranean vaulted chambers housing antique liturgical books, 19th-century records, and cornerstone memorabilia.",
+    "clueHint": "Descend the curved stone stairs beneath the north choir loft.",
+    "category": "history",
+    "iconName": "book-open",
+    "puzzle": {
+      "type": "mcq",
+      "question": "What sacred ancient language was used in the earliest hand-written copies of the New Testament Gospels?",
+      "options": [
+        { "id": "a", "text": "Koine Greek", "isCorrect": true, "feedback": "Exact! Koine ('common') Greek was the universal lingua franca of the 1st century Mediterranean." },
+        { "id": "b", "text": "Classical Latin", "isCorrect": false, "feedback": "Latin became prominent later (e.g. the Vulgate), but the originals were in Greek." },
+        { "id": "c", "text": "Old English", "isCorrect": false, "feedback": "Old English translations did not emerge until centuries later." },
+        { "id": "d", "text": "Akkadian", "isCorrect": false, "feedback": "Akkadian was an ancient Mesopotamian cuneiform language." }
+      ],
+      "scriptureRef": "Papyrus 52 (circa 125 AD)",
+      "funFact": "The oldest surviving fragment of the Gospel of John is preserved on papyrus no bigger than a business card!"
+    },
+    "reward": {
+      "xp": 300,
+      "badgeId": "badge_scripture_master",
+      "badgeTitle": "Archival Scholar",
+      "badgeIcon": "feather",
+      "itemId": "item_ancient_seal",
+      "itemTitle": "Seal of the Bishop",
+      "itemDescription": "A heavy wax seal stamp bearing the cathedral crest and founding date 1888.",
+      "itemRarity": "legendary"
+    }
+  }
+]
