@@ -22,6 +22,7 @@ import {
   computeARPlacement,
   computeARCanvasFrame,
   ARPlacement,
+  AR_SCENE_DEPTH,
   ARViewportBox,
 } from '../utils/arPlacement';
 import { ARSceneView, AR_BUBBLE_FALLBACK_HEIGHT, AR_BUBBLE_TAIL_GAP } from './ar/ARSceneView';
@@ -316,6 +317,18 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    */
   const headBubbleFits = headBubbleReservePx >= desiredHeadBubbleReservePx;
 
+  /**
+   * True once the player has identified this character on screen: the focus-lock
+   * is running, or the character is holding its ground waiting for the key.
+   *
+   * From here the model stops tracking the raw GPS/compass solution. A solved
+   * position inherits every metre of GPS error and every degree of compass
+   * wobble, so a character standing still still shakes and its distance-derived
+   * size breathes — very obvious at close range. Pinning it to a fixed frame
+   * removes the shake entirely and keeps it steady while the key is typed.
+   */
+  const identified = isLocking || phase === 'key' || phase === 'reveal';
+
   /** The slice of the screen the character may occupy — HUD and bubble excluded. */
   const viewport = useMemo<ARViewportBox>(
     () => ({
@@ -334,9 +347,11 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   const canvasFrame = useMemo(
     () =>
       placement && characterSizing
-        ? computeARCanvasFrame(placement, characterSizing, viewport)
+        ? computeARCanvasFrame(placement, characterSizing, viewport, AR_SCENE_DEPTH, {
+            identified,
+          })
         : null,
-    [placement, characterSizing, viewport]
+    [placement, characterSizing, viewport, identified]
   );
 
   // --- Camera stream lifecycle ---------------------------------------------

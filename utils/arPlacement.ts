@@ -28,6 +28,12 @@ export const AR_MIN_APPARENT_FRACTION = 0.1;
 export const AR_MAX_APPARENT_FRACTION = 0.46;
 /** Model width ≈ height × this, used to keep it inside the screen edges. */
 export const AR_MODEL_ASPECT = 0.62;
+/**
+ * Share of the frame an identified character is given. Once the player has the
+ * character on screen it stops being anchored to the live GPS/compass solution
+ * and is framed deliberately instead — see `ARFrameOptions.identified`.
+ */
+export const AR_IDENTIFIED_FRAME_FRACTION = 0.8;
 /** Gap (px) kept between the model and the screen edges. */
 export const AR_SCREEN_MARGIN_PX = 14;
 /**
@@ -205,6 +211,20 @@ export interface ARCharacterSizing {
   aspectRatio?: number;
 }
 
+export interface ARFrameOptions {
+  /**
+   * True once the player has identified this character on screen.
+   *
+   * Before that, the model tracks the live GPS/compass solution and appears at
+   * its true distance. Afterwards it is pinned to the middle of the free band
+   * and sized from `AR_IDENTIFIED_FRAME_FRACTION` of the frame, because a solved
+   * position inherits every metre of GPS error and every degree of compass wobble
+   * — which reads as the model shaking, and its distance-derived size breathing.
+   * Pinning also keeps it steady while the player types the key.
+   */
+  identified?: boolean;
+}
+
 /** The region of the screen the model is allowed to occupy (pixels). */
 export interface ARViewportBox {
   widthPx: number;
@@ -266,7 +286,8 @@ export function computeARCanvasFrame(
   placement: ARPlacement,
   sizing: ARCharacterSizing,
   viewport: ARViewportBox,
-  depth: number = AR_SCENE_DEPTH
+  depth: number = AR_SCENE_DEPTH,
+  options: ARFrameOptions = {}
 ): ARCanvasFrame {
   const halfVFov = (placement.verticalFovDeg * Math.PI) / 360;
   const halfHFov = (placement.horizontalFovDeg * Math.PI) / 360;
@@ -276,6 +297,49 @@ export function computeARCanvasFrame(
   const safeTop = clamp(viewport.safeTopPx, 0, viewport.heightPx);
   const safeBottom = clamp(viewport.safeBottomPx, safeTop, viewport.heightPx);
   const bandHeight = Math.max(safeBottom - safeTop, 1);
+
+  // --- Identified: pin the character to a stable, deliberate frame ----------
+  // Once the player has the character on screen the model is no longer tracking
+  // GPS/compass. That matters: a solved position inherits every metre of GPS
+  // error and every degree of compass wobble, which reads as the model shaking
+  // and its distance-derived size breathing. A pinned frame is identical on
+  // every frame, so it is rock steady while the player types the key.
+  if (options.identified) {
+    const aspect = Math.max(sizing.aspectRatio ?? AR_MODEL_ASPECT, 0.1);
+    // Fill the requested share of the band, but never so wide that it overhangs
+    // the left/right edges (a wide winged model on a narrow phone).
+    const heightPx = Math.min(
+      bandHeight * AR_IDENTIFIED_FRAME_FRACTION,
+      Math.max((viewport.widthPx - 2 * AR_SCREEN_MARGIN_PX) / aspect, 1)
+    );
+    const widthPx = heightPx * aspect;
+    const worldHeight = (heightPx / viewport.heightPx) * heightAtDepth;
+    // Centred in the band, so it is never partially behind the HUD or bubble.
+    const centerXPx = viewport.widthPx / 2;
+    const headYPx = safeTop + (bandHeight - heightPx) / 2;
+
+    return {
+      position: {
+        x: widthAtDepth * (centerXPx / viewport.widthPx - 0.5),
+        y: heightAtDepth * (0.5 - headYPx / viewport.heightPx) - worldHeight,
+        z: -depth,
+      },
+      scale: worldHeight / Math.max(sizing.naturalHeight, 0.001),
+      worldHeight,
+      visible: true,
+      verticalFovDeg: placement.verticalFovDeg,
+      horizontalFovDeg: placement.horizontalFovDeg,
+      screen: {
+        centerXPx,
+        headYPx,
+        baseYPx: headYPx + heightPx,
+        heightPx,
+        widthPx,
+        visible: true,
+        nudged: true,
+      },
+    };
+  }
 
   // --- Apparent size: what the geometry gives vs. what stays readable ------
   const naturalHeightPx =

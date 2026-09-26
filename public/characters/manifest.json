@@ -10,7 +10,7 @@
       "fallbackType": "angel",
       "accent": "#fbbf24",
       "realHeightM": 2.4,
-      "aspectRatio": 0.922,
+      "aspectRatio": 1,
       "attribution": "Zsky"
     },
     {
@@ -22,7 +22,7 @@
       "fallbackType": "guardian",
       "accent": "#38bdf8",
       "realHeightM": 1.8,
-      "aspectRatio": 0.497,
+      "aspectRatio": 1,
       "attribution": "Zsky"
     }
   ]
