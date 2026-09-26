@@ -37,6 +37,5 @@ export interface PlayerProgress {
 export interface GameSettings {
   soundEnabled: boolean;
   hapticsEnabled: boolean;
-  mockMode: boolean;
   targetActivationRadiusMeters: number;
 }

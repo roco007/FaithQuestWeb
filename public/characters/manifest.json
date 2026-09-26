@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "characters": [
+    {
+      "id": "angel-statue-zsky",
+      "name": "Winged Stone Angel",
+      "description": "A detailed winged statue with a red sword.",
+      "kind": "model",
+      "src": "/characters/angel-statue-zsky.glb",
+      "fallbackType": "angel",
+      "accent": "#fbbf24",
+      "realHeightM": 2.4,
+      "aspectRatio": 0.922,
+      "attribution": "Zsky"
+    },
+    {
+      "id": "stone-statue-zsky",
+      "name": "Stone Guardian Statue",
+      "description": "A dark stone guardian statue for entrances and gardens.",
+      "kind": "model",
+      "src": "/characters/stone-statue-zsky.glb",
+      "fallbackType": "guardian",
+      "accent": "#38bdf8",
+      "realHeightM": 1.8,
+      "aspectRatio": 0.497,
+      "attribution": "Zsky"
+    }
+  ]
+}

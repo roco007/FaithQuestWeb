@@ -1,69 +1,166 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+'use client';
 
-export default function Home() {
+import { useRef, useState } from 'react';
+import { MapPin, Locate, Plus, Minus } from 'lucide-react';
+import { useGame } from '../context/GameContext';
+import { GameMap, type GameMapRef } from '../components/GameMap';
+import { XPProgressBar } from '../components/XPProgressBar';
+import { RadarHUD } from '../components/RadarHUD';
+import { ClueModal } from '../components/ClueModal';
+import { useLocation } from '../context/LocationContext';
+import { triggerHaptic } from '../utils/sound';
+
+/** Fallback view: the hunt's first landmark when no location is known yet. */
+const FALLBACK_VIEW = { latitude: 37.774929, longitude: -122.419416, zoom: 17 };
+
+export default function QuestMapPage() {
+  const {
+    nodes,
+    userLocation,
+    activeTargetNode,
+    proximity,
+    progress,
+    setActiveTargetNode,
+  } = useGame();
+
+  // The watch itself lives in `LocationProvider` (app-wide) so it survives
+  // navigating to the hunts; the map only reads its status and can retry.
+  const { errorMsg, startTracking } = useLocation();
+
+  const mapRef = useRef<GameMapRef>(null);
+  const [clueOpen, setClueOpen] = useState(false);
+  const [followUser, setFollowUser] = useState(false);
+
+  // Start the map on the player when we have a fix, otherwise on the hunt.
+  const initialView = userLocation
+    ? { latitude: userLocation.latitude, longitude: userLocation.longitude, zoom: 17 }
+    : FALLBACK_VIEW;
+
+  const centerOnPlayer = () => {
+    // No fix yet: ask the device for one rather than centring on a stale guess.
+    if (!userLocation) {
+      void startTracking();
+      return;
+    }
+    setFollowUser(true);
+    mapRef.current?.centerOn({
+      latitude: userLocation.latitude,
+      longitude: userLocation.longitude,
+      zoom: 17,
+    });
+    triggerHaptic('light');
+  };
+
+  const handleSelectNode = (node: (typeof nodes)[number]) => {
+    triggerHaptic('light');
+    setActiveTargetNode(node);
+    mapRef.current?.centerOn({ latitude: node.latitude, longitude: node.longitude, zoom: 18 });
+  };
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="questScreen">
+      <GameMap
+        ref={mapRef}
+        nodes={nodes}
+        userLocation={userLocation}
+        activeTargetNode={activeTargetNode}
+        completedNodeIds={progress.completedNodeIds}
+        initialView={initialView}
+        onSelectNode={handleSelectNode}
+        followUser={followUser}
+      />
+
+      <div className="questOverlayTop">
+        <XPProgressBar />
+
+        {errorMsg && (
+          <div className="banner bannerWarn" style={{ maxWidth: 560, marginTop: 10 }}>
+            <MapPin size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              {errorMsg}{' '}
+              <button
+                type="button"
+                className="chipBtn"
+                style={{ marginLeft: 6 }}
+                onClick={startTracking}
+              >
+                Retry
+              </button>
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="questSideControls">
+        <button
+          type="button"
+          className="mapBtn"
+          onClick={centerOnPlayer}
+          title="Centre on my position"
+          aria-label="Centre on my position"
+        >
+          <Locate size={20} />
+        </button>
+        <button
+          type="button"
+          className={`mapBtn${followUser ? ' mapBtnActive' : ''}`}
+          onClick={() => setFollowUser((prev) => !prev)}
+          title={followUser ? 'Stop following me' : 'Follow my position'}
+          aria-label={followUser ? 'Stop following me' : 'Follow my position'}
+          aria-pressed={followUser}
+        >
+          <Locate size={20} />
+        </button>
+      </div>
+
+      {/*
+        Zoom lives in its own left-edge rail (midway down the map), not in
+        Leaflet's built-in corner controls: on phone-width viewports the
+        .xpCard / .hudCard overlays cover the map's top-left and bottom-right
+        corners and intercept those taps. It can't live in the right rail
+        either: on short phones (e.g. iPhone SE) the stacked buttons reach
+        .hudCard and the last ones get covered. Top 40% height on the left
+        clears both cards at every screen size.
+      */}
+      <div className="questZoomRail">
+        <button
+          type="button"
+          className="mapBtn"
+          onClick={() => {
+            mapRef.current?.zoomIn();
+            triggerHaptic('light');
+          }}
+          title="Zoom in"
+          aria-label="Zoom in"
+        >
+          <Plus size={20} />
+        </button>
+        <button
+          type="button"
+          className="mapBtn"
+          onClick={() => {
+            mapRef.current?.zoomOut();
+            triggerHaptic('light');
+          }}
+          title="Zoom out"
+          aria-label="Zoom out"
+        >
+          <Minus size={20} />
+        </button>
+      </div>
+
+      <div className="questOverlayBottom">
+        <RadarHUD
+          onDiscoverPress={() => setClueOpen(true)}
+          onSelectAnotherTarget={() => setActiveTargetNode(null)}
         />
-        <div className={styles.intro}>
-          <h1>
-            To get started, edit the{" "}
-            <code className={styles.code}>page.tsx</code> file.
-          </h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
+
+      <ClueModal
+        open={clueOpen}
+        node={activeTargetNode}
+        onClose={() => setClueOpen(false)}
+      />
     </div>
   );
 }

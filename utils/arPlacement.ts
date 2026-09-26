@@ -201,6 +201,8 @@ export interface ARCharacterSizing {
   naturalHeight: number;
   /** Real-world height in metres the model stands for. */
   realHeightM: number;
+  /** Width divided by height. Custom roster assets may override the default. */
+  aspectRatio?: number;
 }
 
 /** The region of the screen the model is allowed to occupy (pixels). */
@@ -279,14 +281,15 @@ export function computeARCanvasFrame(
   const naturalHeightPx =
     ((depth * sizing.realHeightM) / Math.max(placement.distanceMeters, 1.2) / heightAtDepth) *
     viewport.heightPx;
+  const aspectRatio = Math.max(sizing.aspectRatio ?? AR_MODEL_ASPECT, 0.1);
   const maxHeightPx = Math.min(
     viewport.heightPx * AR_MAX_APPARENT_FRACTION,
     bandHeight * 0.92,
-    Math.max((viewport.widthPx - 2 * AR_SCREEN_MARGIN_PX) / AR_MODEL_ASPECT, 1)
+    Math.max((viewport.widthPx - 2 * AR_SCREEN_MARGIN_PX) / aspectRatio, 1)
   );
   const minHeightPx = Math.min(viewport.heightPx * AR_MIN_APPARENT_FRACTION, maxHeightPx);
   const heightPx = clamp(naturalHeightPx, minHeightPx, maxHeightPx);
-  const widthPx = heightPx * AR_MODEL_ASPECT;
+  const widthPx = heightPx * aspectRatio;
   const worldHeight = (heightPx / viewport.heightPx) * heightAtDepth;
 
   // --- Where the geo maths alone would put it ------------------------------

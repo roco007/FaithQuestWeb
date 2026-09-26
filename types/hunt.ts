@@ -24,10 +24,24 @@ export interface HuntCharacter {
   /** Discovery radius in meters (player must be within this to collect). */
   radiusMeters: number;
   characterType: HuntCharacterType;
+  /**
+   * Optional ID from `public/characters/manifest.json`. When present, the AR
+   * camera renders that photo cutout or GLB model; `characterType` remains its
+   * map pin, accent, and procedural fallback. Asset paths are deliberately not
+   * stored in a hunt so shared hunts cannot inject arbitrary URLs.
+   */
+  characterAssetId?: string;
   /** Clue the player receives to locate THIS character. */
   hint: string;
   /** What the character says when found — contains the clue to the next target. */
   dialogue: string;
+  /**
+   * Discovery key the player must present to THIS character to be discovered.
+   * Character N's key is handed out by character N-1 when it is found; the
+   * first character's key is given to players by the creator. Auto-generated
+   * when absent (games saved before keys existed).
+   */
+  key?: string;
 }
 
 export interface HuntGame {

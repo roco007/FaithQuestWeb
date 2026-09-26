@@ -1,3 +1,6 @@
+'use client';
+
+
 import React, {
   createContext,
   useContext,
@@ -10,10 +13,12 @@ import { HuntGame, HuntProgress, HuntGameDraft, HuntCharacter } from '../types/h
 import {
   GameRepository,
   localGameRepository,
-  generateGameId,
+  nextGameId,
   decodeGameShareCode,
   extractGameId,
+  extractShareCode,
 } from '../services/gameRepository';
+import { generateCharacterKey, keyMatches } from '../utils/keys';
 
 export interface DiscoverResult {
   character: HuntCharacter;
@@ -38,8 +43,10 @@ interface HuntContextType {
   /** Accepts a short ID ("FQ-7K2M9X"), bare body, share code, or share message. */
   joinGame: (input: string) => Promise<HuntGame>;
   leaveGame: () => Promise<void>;
-  /** Marks the current character discovered; returns the clue payload to show. */
-  discoverCurrentCharacter: () => Promise<DiscoverResult | null>;
+  /** Marks the current character discovered; returns the clue payload to show.
+   *  `presentedKey` is the key the player hands the character — it must match
+   *  the character's discovery key or an Error is thrown. */
+  discoverCurrentCharacter: (presentedKey?: string) => Promise<DiscoverResult | null>;
   getProgressFor: (gameId: string) => Promise<HuntProgress | null>;
   /** Re-reads games/progress from storage (after external edits). */
   reload: () => Promise<void>;
@@ -47,15 +54,31 @@ interface HuntContextType {
 
 const HuntContext = createContext<HuntContextType | undefined>(undefined);
 
-/** Orders and stamps a draft into a persisted-ready game. */
-function normaliseGame(draft: HuntGameDraft, existing?: HuntGame): HuntGame {
+/**
+ * Orders and stamps a draft into a persisted-ready game.
+ *
+ * `allocatedId` is the hunt number the repository has already reserved for a new
+ * hunt (see `nextGameId`). It is passed in rather than computed here because the
+ * hunt list is React state in the provider, and it must reflect the games
+ * actually on the device.
+ */
+function normaliseGame(
+  draft: HuntGameDraft,
+  existing?: HuntGame,
+  allocatedId?: string
+): HuntGame {
   const now = new Date().toISOString();
   const characters = [...draft.characters]
     .sort((a, b) => a.order - b.order)
-    .map((ch, index) => ({ ...ch, order: index + 1 }));
+    .map((ch, index) => ({
+      ...ch,
+      order: index + 1,
+      // Backfill discovery keys so every published character needs one.
+      key: ch.key?.trim() || generateCharacterKey(),
+    }));
 
   return {
-    id: existing?.id ?? draft.id ?? generateGameId(),
+    id: existing?.id ?? draft.id ?? allocatedId ?? nextGameId([]),
     title: draft.title.trim(),
     description: draft.description.trim(),
     creatorName: draft.creatorName.trim() || 'Mystery Creator',
@@ -107,7 +130,10 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const existing = draft.id
         ? createdGames.find(g => g.id === draft.id) ?? undefined
         : undefined;
-      const game = normaliseGame(draft, existing);
+      // A brand-new hunt takes the next number on the device; an edit keeps the
+      // number it already has so shared codes and invite links still resolve.
+      const allocatedId = existing ? undefined : nextGameId(createdGames.map(g => g.id));
+      const game = normaliseGame(draft, existing, allocatedId);
       await repository.saveGame(game);
       await reload();
       return game;
@@ -144,7 +170,10 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 1) Full self-contained share code (cross-device, no backend needed).
-      let game = decodeGameShareCode(trimmed);
+      //    `extractShareCode` also digs the payload out of a pasted invite link,
+      //    so copying the URL into this box joins exactly like tapping it.
+      const shareCode = extractShareCode(trimmed);
+      let game = shareCode ? decodeGameShareCode(shareCode) : null;
 
       // 2) Short ID — extracted from raw ID or a pasted share message.
       if (!game) {
@@ -162,6 +191,15 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!game.characters || game.characters.length === 0) {
         throw new Error('This game has no characters placed yet.');
       }
+
+      // Backfill discovery keys for games saved before keys existed, so the
+      // key chain works for legacy share codes too.
+      game = {
+        ...game,
+        characters: game.characters.map(ch =>
+          ch.key?.trim() ? ch : { ...ch, key: generateCharacterKey() }
+        ),
+      };
 
       // Persist locally so future joins by short ID also work on this device.
       await repository.saveGame(game);
@@ -191,35 +229,48 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveProgress(null);
   }, [repository]);
 
-  const discoverCurrentCharacter = useCallback(async (): Promise<DiscoverResult | null> => {
-    if (!activeGame || !activeProgress) return null;
+  const discoverCurrentCharacter = useCallback(
+    async (presentedKey?: string): Promise<DiscoverResult | null> => {
+      if (!activeGame || !activeProgress) return null;
 
-    const discovered = new Set(activeProgress.discoveredCharacterIds);
-    const nextCharacter = activeGame.characters.find(ch => !discovered.has(ch.id)) ?? null;
-    if (!nextCharacter) return null;
+      const discovered = new Set(activeProgress.discoveredCharacterIds);
+      const nextCharacter = activeGame.characters.find(ch => !discovered.has(ch.id)) ?? null;
+      if (!nextCharacter) return null;
 
-    const discoveredIds = [...activeProgress.discoveredCharacterIds, nextCharacter.id];
-    const isComplete = discoveredIds.length >= activeGame.characters.length;
+      // The player must hand the character a key: character N's key comes from
+      // character N-1 (the creator gives players the first character's key).
+      if (!keyMatches(presentedKey, nextCharacter.key)) {
+        throw new Error(
+          `That key doesn't match. Present the key the previous character gave you${
+            nextCharacter.order === 1 ? ' — the creator hands out the first key.' : '.'
+          }`
+        );
+      }
 
-    const updatedProgress: HuntProgress = {
-      ...activeProgress,
-      discoveredCharacterIds: discoveredIds,
-      status: isComplete ? 'completed' : 'active',
-      completedAt: isComplete ? new Date().toISOString() : activeProgress.completedAt ?? null,
-    };
-    await repository.saveProgress(updatedProgress);
-    setActiveProgress(updatedProgress);
+      const discoveredIds = [...activeProgress.discoveredCharacterIds, nextCharacter.id];
+      const isComplete = discoveredIds.length >= activeGame.characters.length;
 
-    const nextUp = activeGame.characters.find(ch => !discoveredIds.includes(ch.id)) ?? null;
+      const updatedProgress: HuntProgress = {
+        ...activeProgress,
+        discoveredCharacterIds: discoveredIds,
+        status: isComplete ? 'completed' : 'active',
+        completedAt: isComplete ? new Date().toISOString() : activeProgress.completedAt ?? null,
+      };
+      await repository.saveProgress(updatedProgress);
+      setActiveProgress(updatedProgress);
 
-    return {
-      character: nextCharacter,
-      isFinal: isComplete,
-      nextCharacter: nextUp,
-      game: activeGame,
-      progress: updatedProgress,
-    };
-  }, [activeGame, activeProgress, repository]);
+      const nextUp = activeGame.characters.find(ch => !discoveredIds.includes(ch.id)) ?? null;
+
+      return {
+        character: nextCharacter,
+        isFinal: isComplete,
+        nextCharacter: nextUp,
+        game: activeGame,
+        progress: updatedProgress,
+      };
+    },
+    [activeGame, activeProgress, repository]
+  );
 
   const currentCharacter = useMemo<HuntCharacter | null>(() => {
     if (!activeGame || !activeProgress) return null;

@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
+'use client';
+
+
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { ChurchNode } from '../types/node';
 import { PlayerProgress, LocationCoordinates, ProximityState } from '../types/game';
 import { InventoryItem } from '../types/inventory';
@@ -20,13 +23,10 @@ interface GameContextType {
   userLocation: LocationCoordinates | null;
   isLocating: boolean;
   locationError: string | null;
-  mockMode: boolean;
   activeTargetNode: ChurchNode | null;
   proximity: ProximityState | null;
-  setMockMode: (enabled: boolean) => void;
   setUserLocation: (coords: LocationCoordinates) => void;
   setActiveTargetNode: (node: ChurchNode | null) => void;
-  teleportToNode: (node: ChurchNode, insideRadius?: boolean) => void;
   solveNode: (nodeId: string) => Promise<SolveResult>;
   resetProgress: () => Promise<void>;
   updateLocationFromGPS: (coords: LocationCoordinates) => void;
@@ -45,15 +45,11 @@ const RANKS = [
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [nodes] = useState<ChurchNode[]>(churchNodesData as ChurchNode[]);
   const [progress, setProgress] = useState<PlayerProgress>(INITIAL_PLAYER_PROGRESS);
-  const [userLocation, setUserLocationState] = useState<LocationCoordinates | null>({
-    latitude: 37.774929,
-    longitude: -122.419416,
-    accuracy: 5,
-    heading: 0,
-  });
+  // Starts as null: the app never invents a position. Until the device's
+  // first real fix arrives, screens show a "waiting for a position" state.
+  const [userLocation, setUserLocationState] = useState<LocationCoordinates | null>(null);
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [mockMode, setMockMode] = useState<boolean>(true); // default true for seamless local testing
   const [activeTargetNode, setActiveTargetNode] = useState<ChurchNode | null>(null);
 
   // Load saved progress on boot
@@ -78,37 +74,30 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return evaluateProximity(userLocation, activeTargetNode);
   }, [userLocation, activeTargetNode]);
 
-  // Trigger haptic and sound when transitioning into range
+  // Feedback fires on the *transition* into range. The active target defaults to
+  // the first node, which can already be where the player stands on boot, so
+  // without this edge check every page load would buzz + play the arrival tone.
+  const wasInRadiusRef = useRef<boolean | undefined>(undefined);
   useEffect(() => {
-    if (proximity?.isWithinRadius) {
+    const isInRange = proximity?.isWithinRadius ?? false;
+    if (isInRange && wasInRadiusRef.current === false) {
       triggerHaptic('success');
       playSoundEffect('in_range');
     }
+    wasInRadiusRef.current = isInRange;
   }, [proximity?.isWithinRadius]);
-
-  const updateLocationFromGPS = useCallback((coords: LocationCoordinates) => {
-    if (!mockMode) {
-      setUserLocationState(coords);
-    }
-  }, [mockMode]);
 
   const setUserLocation = useCallback((coords: LocationCoordinates) => {
     setUserLocationState(coords);
   }, []);
 
-  const teleportToNode = useCallback((node: ChurchNode, insideRadius: boolean = true) => {
-    // If insideRadius is true, teleport directly on target.
-    // If false, place player ~35 meters away so they can test approaching it!
-    const offset = insideRadius ? 0 : 0.00032; // ~35 meters offset
-    const coords: LocationCoordinates = {
-      latitude: node.latitude + offset,
-      longitude: node.longitude + offset,
-      accuracy: 4,
-      heading: 45,
-    };
+  /**
+   * Applies a fix read from the device's Geolocation API. Separate from
+   * `setUserLocation` so the GPS watch is the only thing that can move the
+   * player around by itself — no other code can fake a position.
+   */
+  const updateLocationFromGPS = useCallback((coords: LocationCoordinates) => {
     setUserLocationState(coords);
-    setActiveTargetNode(node);
-    triggerHaptic('light');
   }, []);
 
   const solveNode = useCallback(
@@ -225,16 +214,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         userLocation,
         isLocating,
         locationError,
-        mockMode,
         activeTargetNode,
         proximity,
-        setMockMode,
         setUserLocation,
+        updateLocationFromGPS,
         setActiveTargetNode,
-        teleportToNode,
         solveNode,
         resetProgress,
-        updateLocationFromGPS,
       }}
     >
       {children}
