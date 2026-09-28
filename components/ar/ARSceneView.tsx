@@ -4,6 +4,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { HuntCharacterType } from '../../types/hunt';
 import type { CharacterAsset } from '../../services/characterAssets';
+import type { SponsorBanner } from '../../services/sponsorBanners';
+import { encodePublicPath } from '../../services/sponsorBanners';
 import {
   ARCanvasFrame,
   AR_VERTICAL_FOV_DEG,
@@ -30,6 +32,23 @@ const BUBBLE_MAX_WIDTH = 268;
  * AR screen's headroom reservation starts from the same number this layer uses.
  */
 export const AR_BUBBLE_FALLBACK_HEIGHT = 86;
+/**
+ * Gap (px) between the model's head and the bottom of the sponsor card. The
+ * card hangs above the character like the bubble (banner alone before the key,
+ * banner + hint after), so the AR screen reserves this much headroom for it.
+ */
+export const AR_CARD_GAP = 16;
+/**
+ * Sponsor-card height (px) assumed before the first measurement while only the
+ * banner shows: the image strip (capped at 96px) plus the card border.
+ */
+export const AR_BANNER_CARD_FALLBACK_HEIGHT = 110;
+/**
+ * Combined-card height (px) assumed before the first measurement once the key
+ * is accepted — the bubble fallback plus a banner strip. Exported so the AR
+ * screen's headroom reservation starts from the same number this layer uses.
+ */
+export const AR_COMBINED_CARD_FALLBACK_HEIGHT = 200;
 
 interface ARSceneViewProps {
   characterType: HuntCharacterType;
@@ -42,13 +61,14 @@ interface ARSceneViewProps {
   /**
    * Whether media assets (cutout videos) may play. False while hunting or
    * entering the key, so the clip holds its first frame; true once the key
-   * is accepted and the voiceover starts.
+   * is accepted — while the voiceover speaks, or for the whole reveal when
+   * the clip carries its own audio.
    */
   mediaPlaying?: boolean;
   /**
-   * Bumped every time the voiceover is (re)started so a cutout video restarts
-   * from frame 1 in sync with what the character says. Ignored unless
-   * `mediaPlaying` is true.
+   * Bumped every time the voiceover — or a video character's own audio — is
+   * (re)started so a cutout video restarts from frame 1 in sync with what the
+   * character says. Ignored unless `mediaPlaying` is true.
    */
   mediaRestartToken?: number;
   /**
@@ -66,11 +86,25 @@ interface ARSceneViewProps {
   /** Rows appended under the bubble text — the revealed key + next hint. */
   bubbleExtra?: React.ReactNode;
   /**
-   * Reports the head bubble's measured height in px (0 while it is hidden) so
-   * the parent AR screen can keep that much space free above the character and
-   * the bubble never has to be clamped down over the model.
+   * Reports the height of whatever occupies the slot above the character's
+   * head — the bubble, or the sponsor card when a banner owns the slot — in
+   * px (0 while that slot is empty) so the parent AR screen can keep that much
+   * headroom free and the dialogue never has to be clamped down over the model.
    */
   onBubbleHeightChange?: (heightPx: number) => void;
+  /**
+   * The deployment banner selected for this character. When set, the sponsor
+   * card owns the slot above the character's head in every phase: the banner
+   * alone before the key is entered, the banner + hint dialogue after it.
+   * When absent the hint keeps floating above the head as before.
+   */
+  sponsorBanner?: SponsorBanner | null;
+  /**
+   * Parent-side gate for the sponsor card: false while the reveal has docked
+   * into the bottom HUD (the card cannot fit there). The card then reports 0,
+   * the headroom estimate holds, and the layout settles instead of flickering.
+   */
+  showSponsorCard?: boolean;
   /** Accent colour for the bubble. */
   accent?: string;
   /** Reported when WebGL/three.js cannot run, so the HUD can adapt. */
@@ -108,6 +142,8 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
   label,
   bubbleExtra,
   onBubbleHeightChange,
+  sponsorBanner = null,
+  showSponsorCard = false,
   accent = '#38bdf8',
   onRendererStateChange,
 }) => {
@@ -199,15 +235,19 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
     };
   }, [sceneReady, characterType, characterAsset]);
 
-  // Gate cutout-video playback on the voiceover: paused on frame 1 while
-  // hunting or entering the key, rolling only while the reveal voice speaks,
-  // frozen on the last shown frame when it ends. A restart token rewinds the
-  // clip so replaying the voiceover replays the video from the top in sync.
+  // Gate cutout-video playback on the reveal: paused on frame 1 while hunting
+  // or entering the key, rolling only while the reveal voice speaks (or for the
+  // whole reveal when the clip is its own voice — it plays once and holds its
+  // final frame), frozen when it ends. A restart token rewinds the clip so a
+  // replay restarts it from the top in sync.
   useEffect(() => {
     const current = characterRef.current;
     if (!current) return;
     if (!mediaPlaying) {
       current.pause?.();
+      // Remember the latest cue while paused so the next reveal's fresh cue
+      // rewinds to frame 1 instead of resuming mid-clip.
+      appliedRestartRef.current = mediaRestartToken;
       return;
     }
     if (appliedRestartRef.current !== mediaRestartToken) {
@@ -419,6 +459,8 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
   /** Viewport size — the layer is fullscreen, so window size is the container. */
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [bubbleHeight, setBubbleHeight] = useState(AR_BUBBLE_FALLBACK_HEIGHT);
+  /** Measured height of the sponsor card drawn above the model's head. */
+  const [cardHeight, setCardHeight] = useState(AR_COMBINED_CARD_FALLBACK_HEIGHT);
   useEffect(() => {
     const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
     onResize();
@@ -426,16 +468,25 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  /** True while the head bubble is actually on screen. */
+  /** True while the dialogue (hint or reveal) is actually on screen. */
   const bubbleVisible = Boolean((hint || bubbleExtra) && anchor && viewport.width > 0);
+  /** True while the sponsor card (banner alone or banner + hint) is on screen. */
+  const bannerCardVisible = Boolean(
+    showSponsorCard && sponsorBanner && anchor && viewport.width > 0
+  );
 
-  // Report the bubble's height to the AR screen so it can reserve that much
-  // headroom above the character: the bubble is always drawn *above* the head,
-  // so the model has to start below it. Declared before the WebGL-failure
-  // branch below — hooks may not run conditionally.
+  // Report the height of the slot above the character's head so the AR screen
+  // can reserve exactly that much headroom: the sponsor card when a banner
+  // owns the slot, the plain bubble when it does not, 0 when the slot is
+  // empty. Declared before the WebGL-failure branch below — hooks may not run
+  // conditionally.
   useEffect(() => {
-    onBubbleHeightRef.current?.(bubbleVisible ? bubbleHeight : 0);
-  }, [bubbleVisible, bubbleHeight]);
+    if (sponsorBanner) {
+      onBubbleHeightRef.current?.(bannerCardVisible ? cardHeight : 0);
+    } else {
+      onBubbleHeightRef.current?.(bubbleVisible ? bubbleHeight : 0);
+    }
+  }, [sponsorBanner, bannerCardVisible, bubbleVisible, cardHeight, bubbleHeight]);
 
   // The clue lock-on works from GPS + orientation alone, so if the 3D overlay
   // cannot start the hunt stays completable — we just explain what happened.
@@ -461,7 +512,7 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
   // headroom is genuinely unavailable.
   const bubbleWidth = Math.min(BUBBLE_MAX_WIDTH, Math.max(viewport.width - 24, 120));
   let bubble: React.ReactElement | null = null;
-  if (bubbleVisible && anchor) {
+  if (bubbleVisible && anchor && !sponsorBanner) {
     const left = clamp(
       anchor.centerXPx - bubbleWidth / 2,
       12,
@@ -496,10 +547,62 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
     );
   }
 
+  // Sponsor card: the banner pinned just above the model's head — the banner
+  // alone before the key is entered, the banner + hint/reveal dialogue once the
+  // key is accepted. With no banner the head bubble above renders instead —
+  // the layout players already know.
+  let sponsorCard: React.ReactElement | null = null;
+  if (bannerCardVisible && anchor && sponsorBanner) {
+    const left = clamp(
+      anchor.centerXPx - bubbleWidth / 2,
+      12,
+      Math.max(viewport.width - 12 - bubbleWidth, 12)
+    );
+    // Keep it on screen: bottom edge AR_CARD_GAP above the head, top edge at
+    // least 8px from the top — the same clamps the head bubble uses.
+    const maxBottom = Math.max(viewport.height - 8 - cardHeight, 12);
+    const bottom = clamp(viewport.height - anchor.headYPx + AR_CARD_GAP, 12, maxBottom);
+    // Pre-key the card is the banner alone; the hint/reveal rows join under it
+    // only once the character actually speaks (the reveal).
+    const combined = Boolean(hint) || Boolean(bubbleExtra);
+
+    sponsorCard = (
+      <div
+        className="arSponsorCard"
+        style={{ left, bottom, width: bubbleWidth }}
+        aria-live="polite"
+        ref={el => {
+          if (!el) return;
+          const measured = Math.round(el.getBoundingClientRect().height);
+          setCardHeight(previous => (Math.abs(previous - measured) > 1 ? measured : previous));
+        }}
+      >
+        <img
+          className="arSponsorCardBanner"
+          src={encodePublicPath(sponsorBanner.src)}
+          alt={sponsorBanner.alt}
+        />
+        {combined && (
+          <div className="arSponsorCardBody">
+            <div className="arBubbleHeader">
+              <span className="arBubbleDot" style={{ background: accent }} />
+              <span className="arBubbleSpeaker" style={{ color: accent }}>
+                {label ?? (speaker ? `${speaker} — HINT` : 'HINT TO THIS CHARACTER')}
+              </span>
+            </div>
+            {hint && <p className="arBubbleText">{hint}</p>}
+            {bubbleExtra}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} aria-hidden="true" />
       {bubble}
+      {sponsorCard}
     </>
   );
 };

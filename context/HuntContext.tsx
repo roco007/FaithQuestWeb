@@ -52,6 +52,23 @@ interface HuntContextType {
   reload: () => Promise<void>;
 }
 
+/**
+ * Shared key gate: throws the player-facing mismatch error unless
+ * `presentedKey` matches the character's discovery key. Exported so the AR
+ * camera can check the key *before* running a character's reveal questions —
+ * while the authoritative discovery still re-validates inside
+ * `discoverCurrentCharacter`, so no path records a discovery on a wrong key.
+ */
+export function assertPresentedKey(character: HuntCharacter, presentedKey?: string): void {
+  if (!keyMatches(presentedKey, character.key)) {
+    throw new Error(
+      `That key doesn't match. Present the key the previous character gave you${
+        character.order === 1 ? ' — the creator hands out the first key.' : '.'
+      }`
+    );
+  }
+}
+
 const HuntContext = createContext<HuntContextType | undefined>(undefined);
 
 /**
@@ -82,7 +99,7 @@ function normaliseGame(
     title: draft.title.trim(),
     description: draft.description.trim(),
     creatorName: draft.creatorName.trim() || 'Mystery Creator',
-    createdAt: existing?.createdAt ?? now,
+    createdAt: existing?.createdAt ?? draft.createdAt ?? now,
     updatedAt: now,
     endAnnouncement: draft.endAnnouncement.trim(),
     characters,
@@ -239,13 +256,7 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // The player must hand the character a key: character N's key comes from
       // character N-1 (the creator gives players the first character's key).
-      if (!keyMatches(presentedKey, nextCharacter.key)) {
-        throw new Error(
-          `That key doesn't match. Present the key the previous character gave you${
-            nextCharacter.order === 1 ? ' — the creator hands out the first key.' : '.'
-          }`
-        );
-      }
+      assertPresentedKey(nextCharacter, presentedKey);
 
       const discoveredIds = [...activeProgress.discoveredCharacterIds, nextCharacter.id];
       const isComplete = discoveredIds.length >= activeGame.characters.length;

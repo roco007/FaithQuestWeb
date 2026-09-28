@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "banners": [
+    {
+      "id": "kanmani-cafe",
+      "name": "Kanmani Cafe",
+      "description": "Example launch sponsor — cafe banner shown under the character.",
+      "src": "/marketing/Kanmani Cafe banner.png",
+      "alt": "Kanmani Cafe — sponsored banner"
+    }
+  ]
+}
