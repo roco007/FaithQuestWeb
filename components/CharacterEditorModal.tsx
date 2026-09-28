@@ -1,15 +1,36 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Image as ImageIcon, MapPin, Sparkles, RefreshCw, KeyRound } from 'lucide-react';
-import type { HuntCharacter, HuntCharacterType } from '../types/hunt';
+import {
+  Box,
+  Image as ImageIcon,
+  MapPin,
+  Sparkles,
+  RefreshCw,
+  KeyRound,
+  Megaphone,
+  ListChecks,
+  CheckCircle2,
+  Plus,
+  X,
+} from 'lucide-react';
+import type { HuntCharacter, HuntCharacterType, HuntQuestion, HuntQuestionType } from '../types/hunt';
 import type { LocationCoordinates } from '../types/game';
 import type { CharacterAsset } from '../services/characterAssets';
 import { loadCharacterAssets } from '../services/characterAssets';
+import type { SponsorBanner } from '../services/sponsorBanners';
+import { encodePublicPath, loadSponsorBanners } from '../services/sponsorBanners';
 import { Modal } from './Modal';
 import { CharacterPinMap } from './CharacterPinMap';
 import { PlaceSearchBox } from './PlaceSearchBox';
 import { generateCharacterKey } from '../utils/keys';
+import {
+  createQuestionId,
+  isEmptyQuestion,
+  newMcqQuestion,
+  newTextQuestion,
+  questionValidationError,
+} from '../utils/huntQuestions';
 
 const CHARACTER_TYPES: { value: HuntCharacterType; label: string; glyph: string }[] = [
   { value: 'guardian', label: 'Guardian', glyph: '🛡' },
@@ -61,6 +82,11 @@ export function CharacterEditorModal({
   );
   const [characterAssets, setCharacterAssets] = useState<CharacterAsset[]>([]);
   const [rosterState, setRosterState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [sponsorBannerId, setSponsorBannerId] = useState<string | null>(
+    initial?.sponsorBannerId ?? null
+  );
+  const [sponsorBanners, setSponsorBanners] = useState<SponsorBanner[]>([]);
+  const [sponsorState, setSponsorState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [latitude, setLatitude] = useState(initial?.latitude ?? defaultLatitude);
   const [longitude, setLongitude] = useState(initial?.longitude ?? defaultLongitude);
   // Text mirrors of the coordinates so latitude/longitude can be typed
@@ -71,6 +97,8 @@ export function CharacterEditorModal({
   const [altitudeMeters, setAltitudeMeters] = useState(initial?.altitudeMeters ?? 0);
   const [radiusMeters, setRadiusMeters] = useState(initial?.radiusMeters ?? 25);
   const [characterKey, setCharacterKey] = useState(initial?.key ?? generateCharacterKey());
+  /** Reveal questions asked after the key is accepted (see `HuntQuestion`). */
+  const [questions, setQuestions] = useState<HuntQuestion[]>(initial?.questions ?? []);
   // Name of the place chosen via search, shown back so the creator can see what
   // they picked; cleared as soon as they adjust the pin by hand.
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
@@ -116,9 +144,37 @@ export function CharacterEditorModal({
     };
   }, [open]);
 
+  // Sponsor banners are deployment-owned like the character roster. Absence
+  // simply means "no advertising for this character" and keeps current layout.
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setSponsorState(current => (current === 'ready' ? current : 'loading'));
+    loadSponsorBanners()
+      .then(banners => {
+        if (!active) return;
+        setSponsorBanners(banners);
+        setSponsorState('ready');
+      })
+      .catch(loadError => {
+        if (!active) return;
+        console.warn('Could not load sponsor banner roster:', loadError);
+        setSponsorBanners([]);
+        setSponsorState('error');
+      });
+    return () => {
+      active = false;
+    };
+  }, [open]);
+
   const selectedCharacterAsset = useMemo(
     () => characterAssets.find(asset => asset.id === characterAssetId) ?? null,
     [characterAssets, characterAssetId]
+  );
+
+  const selectedSponsorBanner = useMemo(
+    () => sponsorBanners.find(banner => banner.id === sponsorBannerId) ?? null,
+    [sponsorBanners, sponsorBannerId]
   );
 
   // Re-seed the form each time the modal opens (reset-on-open), including
@@ -146,6 +202,8 @@ export function CharacterEditorModal({
     setAltitudeMeters(initial?.altitudeMeters ?? 0);
     setRadiusMeters(initial?.radiusMeters ?? 25);
     setCharacterKey(initial?.key ?? generateCharacterKey());
+    setQuestions(initial?.questions ?? []);
+    setSponsorBannerId(initial?.sponsorBannerId ?? null);
     setError(null);
   } else if (!open && wasOpen) {
     setWasOpen(false);
@@ -161,6 +219,23 @@ export function CharacterEditorModal({
     setLonText(raw);
     const n = Number(raw);
     if (raw.trim() !== '' && Number.isFinite(n) && n >= -180 && n <= 180) setLongitude(n);
+  };
+
+  /** Replaces one question in the reveal-gate list. */
+  const setQuestionAt = (index: number, next: HuntQuestion) => {
+    setQuestions(prev => prev.map((question, i) => (i === index ? next : question)));
+  };
+
+  /**
+   * Swapping a question's type keeps its id and prompt and re-seeds the answer
+   * shape — typed answers and choices don't carry across, since what "correct"
+   * means is entirely different.
+   */
+  const handleQuestionTypeChange = (index: number, type: HuntQuestionType) => {
+    const current = questions[index];
+    if (!current || current.type === type) return;
+    const template = type === 'mcq' ? newMcqQuestion() : newTextQuestion();
+    setQuestionAt(index, { ...template, id: current.id, prompt: current.prompt });
   };
 
   const handleSave = () => {
@@ -183,6 +258,35 @@ export function CharacterEditorModal({
       return;
     }
 
+    // Drop questions that were added but never typed into, then validate the
+    // rest — a half-filled question would ship as an unanswerable gate.
+    const finalQuestions: HuntQuestion[] = questions
+      .filter(question => !isEmptyQuestion(question))
+      .map((question): HuntQuestion => {
+        const prompt = question.prompt.trim();
+        if (question.type === 'text') {
+          return {
+            id: question.id,
+            type: 'text',
+            prompt,
+            answers: (question.answers ?? []).map(answer => answer.trim()).filter(Boolean),
+          };
+        }
+        return {
+          id: question.id,
+          type: 'mcq',
+          prompt,
+          options: (question.options ?? []).map(option => ({ ...option, text: option.text.trim() })),
+        };
+      });
+    for (const question of finalQuestions) {
+      const problem = questionValidationError(question);
+      if (problem) {
+        setError(problem);
+        return;
+      }
+    }
+
     onSave({
       id: initial?.id ?? createLocalId(),
       order: initial?.order ?? 0,
@@ -194,9 +298,13 @@ export function CharacterEditorModal({
       radiusMeters,
       characterType,
       ...(characterAssetId ? { characterAssetId } : {}),
+      ...(sponsorBannerId ? { sponsorBannerId } : {}),
       hint: hint.trim(),
       dialogue: dialogue.trim(),
       key: characterKey.trim() || generateCharacterKey(),
+      // Omitted entirely when empty, so key-only characters keep the exact
+      // pre-questions shape in storage and exports.
+      ...(finalQuestions.length > 0 ? { questions: finalQuestions } : {}),
     });
   };
 
@@ -235,108 +343,132 @@ export function CharacterEditorModal({
       </div>
 
       <div className="field">
-        <span className="fieldLabel" id="camera-character-label">
+        <label className="fieldLabel" htmlFor="char-camera">
           <Box size={12} /> Camera Character
-        </span>
-        <div className="rosterSection" role="group" aria-labelledby="camera-character-label">
-          <div className="rosterSectionTitle">Built-in characters</div>
-          <div className="rosterGrid rosterGridBuiltIn">
-            {CHARACTER_TYPES.map(characterTypeOption => {
-              const selected = characterAssetId === null;
-              return (
-                <button
-                  key={characterTypeOption.value}
-                  type="button"
-                  className={`rosterCard rosterCardCompact${selected ? ' rosterCardSelected' : ''}`}
-                  aria-pressed={selected}
-                  onClick={() => {
-                    setCharacterType(characterTypeOption.value);
-                    setCharacterAssetId(null);
-                  }}
-                >
-                  <span className="rosterGlyph" aria-hidden="true">
-                    {characterTypeOption.glyph}
-                  </span>
-                  <span>{characterTypeOption.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="rosterSection">
-          <div className="rosterSectionTitle">Camera roster</div>
-          {rosterState === 'loading' && <p className="fieldHelp">Loading camera characters…</p>}
-          {rosterState === 'error' && (
-            <div className="rosterNotice" role="status">
-              The camera roster could not load. Built-in characters are still available.
-            </div>
-          )}
-          {rosterState === 'ready' && characterAssets.length === 0 && (
-            <p className="fieldHelp">No custom camera characters are installed yet.</p>
-          )}
+        </label>
+        <select
+          id="char-camera"
+          className="input"
+          value={characterAssetId !== null ? `asset:${characterAssetId}` : `type:${characterType}`}
+          onChange={e => {
+            const picked = e.target.value;
+            if (picked.startsWith('asset:')) {
+              const assetId = picked.slice('asset:'.length);
+              setCharacterAssetId(assetId);
+              // The pin's glyph and accent follow the chosen asset's fallback style.
+              const asset = characterAssets.find(candidate => candidate.id === assetId);
+              if (asset) setCharacterType(asset.fallbackType);
+              return;
+            }
+            const builtin = CHARACTER_TYPES.find(option => `type:${option.value}` === picked);
+            if (!builtin) return;
+            setCharacterAssetId(null);
+            setCharacterType(builtin.value);
+          }}
+        >
+          <optgroup label="Built-in characters">
+            {CHARACTER_TYPES.map(characterTypeOption => (
+              <option key={characterTypeOption.value} value={`type:${characterTypeOption.value}`}>
+                {characterTypeOption.glyph} {characterTypeOption.label}
+              </option>
+            ))}
+          </optgroup>
           {characterAssets.length > 0 && (
-            <div className="rosterGrid">
-              {characterAssets.map(asset => {
-                const selected = asset.id === characterAssetId;
-                return (
-                  <button
-                    key={asset.id}
-                    type="button"
-                    className={`rosterCard${selected ? ' rosterCardSelected' : ''}`}
-                    aria-pressed={selected}
-                    onClick={() => {
-                      setCharacterType(asset.fallbackType);
-                      setCharacterAssetId(asset.id);
-                    }}
-                  >
-                    <span
-                      className={`rosterPreview rosterPreview${
-                        asset.kind === 'model' ? 'Model' : asset.kind === 'video' ? 'Video' : 'Image'
-                      }`}
-                      style={
-                        asset.kind === 'image'
-                          ? { backgroundImage: `url(${JSON.stringify(asset.src).slice(1, -1)})` }
-                          : undefined
-                      }
-                      aria-hidden="true"
-                    >
-                      {asset.kind === 'image' ? null : asset.kind === 'video' ? (
-                        <video
-                          className="rosterPreviewClip"
-                          src={asset.src}
-                          muted
-                          loop
-                          playsInline
-                          preload="metadata"
-                          tabIndex={-1}
-                        />
-                      ) : (
-                        <Box size={30} />
-                      )}
-                    </span>
-                    <span className="rosterCopy">
-                      <strong>{asset.name}</strong>
-                      <span className="rosterKind">
-                        {asset.kind === 'model'
-                          ? '3D model'
-                          : asset.kind === 'video'
-                            ? 'Cutout video'
-                            : 'Photo cutout'}{' '}
-                        · {asset.realHeightM}m
-                      </span>
-                      {asset.description && <span>{asset.description}</span>}
-                    </span>
-                  </button>
-                );
-              })}
+            <optgroup label="Camera roster">
+              {characterAssets.map(asset => (
+                <option key={asset.id} value={`asset:${asset.id}`}>
+                  {asset.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {/* Keep a saved roster entry selectable while the manifest loads or fails. */}
+          {characterAssetId !== null &&
+            !characterAssets.some(asset => asset.id === characterAssetId) && (
+              <option value={`asset:${characterAssetId}`}>
+                Saved camera character ({characterAssetId})
+              </option>
+            )}
+        </select>
+        {rosterState === 'loading' && <p className="fieldHelp">Loading camera characters…</p>}
+        {rosterState === 'error' && (
+          <div className="rosterNotice" role="status">
+            The camera roster could not load. Built-in characters are still available.
+          </div>
+        )}
+        {rosterState === 'ready' && characterAssets.length === 0 && (
+          <p className="fieldHelp">No custom camera characters are installed yet.</p>
+        )}
+        {selectedCharacterAsset && (
+          <p className="fieldHelp">
+            {selectedCharacterAsset.kind === 'model'
+              ? '3D model'
+              : selectedCharacterAsset.kind === 'video'
+                ? 'Cutout video'
+                : 'Photo cutout'}
+            {' · '}
+            {selectedCharacterAsset.realHeightM}m
+            {selectedCharacterAsset.description ? ` — ${selectedCharacterAsset.description}` : ''}
+          </p>
+        )}
+        <p className="fieldHelp">
+          The selected roster character appears through the player&apos;s camera at the map pin.
+          Its built-in style is used for the map glyph and as a fallback.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="fieldLabel" htmlFor="char-sponsor">
+          <Megaphone size={12} /> Sponsor Banner (optional)
+        </label>
+        <select
+          id="char-sponsor"
+          className="input"
+          value={sponsorBannerId ?? ''}
+          onChange={e => setSponsorBannerId(e.target.value || null)}
+        >
+          <option value="">No banner — hint above the head</option>
+          {sponsorBanners.map(banner => (
+            <option key={banner.id} value={banner.id}>
+              {banner.name}
+            </option>
+          ))}
+          {/* Keep a saved banner selectable while the manifest loads or fails. */}
+          {sponsorBannerId !== null &&
+            !sponsorBanners.some(banner => banner.id === sponsorBannerId) && (
+              <option value={sponsorBannerId}>Saved banner ({sponsorBannerId})</option>
+            )}
+        </select>
+        {sponsorState === 'loading' && <p className="fieldHelp">Loading sponsor banners…</p>}
+        {sponsorState === 'error' && (
+          <div className="rosterNotice" role="status">
+            The sponsor banner roster could not load — this character keeps the default hint
+            layout.
+          </div>
+        )}
+        {sponsorState === 'ready' && sponsorBanners.length === 0 && (
+          <p className="fieldHelp">No sponsor banners are installed yet.</p>
+        )}
+        {sponsorState === 'ready' &&
+          sponsorBannerId !== null &&
+          !sponsorBanners.some(banner => banner.id === sponsorBannerId) && (
+            <div className="rosterNotice" role="status">
+              The saved banner “{sponsorBannerId}” is no longer installed — the default hint
+              layout will be used.
             </div>
           )}
-          <p className="fieldHelp">
-            The selected roster character appears through the player&apos;s camera at the map pin.
-            Its built-in style is used for the map glyph and as a fallback.
-          </p>
-        </div>
+        {selectedSponsorBanner && (
+          <img
+            className="sponsorBannerPreview"
+            src={encodePublicPath(selectedSponsorBanner.src)}
+            alt={selectedSponsorBanner.alt}
+          />
+        )}
+        <p className="fieldHelp">
+          A selected banner shows in a card above the character in the AR view — on its own
+          before the key is entered, combined with the hint after it; with no banner the hint
+          stays above the character&apos;s head.
+        </p>
       </div>
 
       <div className="field">
@@ -465,6 +597,175 @@ export function CharacterEditorModal({
           Players must present this key to discover the character. Hand the first character's key
           to players yourself to start the hunt — each character gives the next key when found.
         </p>
+      </div>
+
+      {/* Reveal-question gate: asked after the key matches and before the
+          character's dialogue/video unlocks. Optional — no questions means the
+          key alone opens the character (the original behaviour). */}
+      <div className="field">
+        <span className="fieldLabel">
+          <ListChecks size={12} /> Reveal Questions (optional)
+        </span>
+        <p className="fieldHelp">
+          Asked after the player presents the key and before this character's message and video
+          are revealed — every question must be answered correctly to unlock it. Leave this empty
+          to let the key alone open the character.
+        </p>
+
+        {questions.map((question, qIndex) => (
+          <div key={question.id} className="qEditorCard">
+            <div className="qEditorHead">
+              <span className="qEditorIndex">Question {qIndex + 1}</span>
+              <div className="qTypeToggle" role="group" aria-label={`Question ${qIndex + 1} type`}>
+                <button
+                  type="button"
+                  className={`qTypeBtn${question.type === 'text' ? ' qTypeBtnActive' : ''}`}
+                  aria-pressed={question.type === 'text'}
+                  onClick={() => handleQuestionTypeChange(qIndex, 'text')}
+                >
+                  Short answer
+                </button>
+                <button
+                  type="button"
+                  className={`qTypeBtn${question.type === 'mcq' ? ' qTypeBtnActive' : ''}`}
+                  aria-pressed={question.type === 'mcq'}
+                  onClick={() => handleQuestionTypeChange(qIndex, 'mcq')}
+                >
+                  Multiple choice
+                </button>
+              </div>
+              <button
+                type="button"
+                className="iconBtn"
+                aria-label={`Remove question ${qIndex + 1}`}
+                onClick={() => setQuestions(prev => prev.filter((_, i) => i !== qIndex))}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <input
+              className="input"
+              value={question.prompt}
+              onChange={e => setQuestionAt(qIndex, { ...question, prompt: e.target.value })}
+              placeholder="e.g. What did Jesus feed the five thousand with?"
+              aria-label={`Question ${qIndex + 1} text`}
+            />
+
+            {question.type === 'text' ? (
+              <>
+                <input
+                  className="input"
+                  value={(question.answers ?? []).join(', ')}
+                  onChange={e =>
+                    // Split raw (no trim/filter) so a trailing comma or space
+                    // the creator is still typing survives; empties are
+                    // trimmed away in handleSave.
+                    setQuestionAt(qIndex, { ...question, answers: e.target.value.split(',') })
+                  }
+                  placeholder="Accepted answers, separated by commas"
+                  aria-label={`Question ${qIndex + 1} accepted answers`}
+                />
+                <p className="fieldHelp">
+                  Letter case and extra spaces don't matter — and a near-miss still counts:
+                  anything at least 80% similar to one of these is accepted.
+                </p>
+              </>
+            ) : (
+              <div className="qOptionsList">
+                {(question.options ?? []).map((option, oIndex) => (
+                  <div key={option.id} className="qOptionRow">
+                    <button
+                      type="button"
+                      className={`qOptionCorrect${option.isCorrect ? ' qOptionCorrectOn' : ''}`}
+                      aria-label={
+                        option.isCorrect
+                          ? 'Correct answer'
+                          : `Mark option ${oIndex + 1} as correct`
+                      }
+                      title="Tap to mark the correct answer"
+                      onClick={() =>
+                        setQuestionAt(qIndex, {
+                          ...question,
+                          options: (question.options ?? []).map((candidate, i) => ({
+                            ...candidate,
+                            isCorrect: i === oIndex,
+                          })),
+                        })
+                      }
+                    >
+                      <CheckCircle2 size={15} />
+                    </button>
+                    <input
+                      className="input"
+                      value={option.text}
+                      onChange={e =>
+                        setQuestionAt(qIndex, {
+                          ...question,
+                          options: (question.options ?? []).map((candidate, i) =>
+                            i === oIndex ? { ...candidate, text: e.target.value } : candidate
+                          ),
+                        })
+                      }
+                      placeholder={`Option ${oIndex + 1}`}
+                      aria-label={`Question ${qIndex + 1} option ${oIndex + 1}`}
+                    />
+                    {(question.options ?? []).length > 2 && (
+                      <button
+                        type="button"
+                        className="iconBtn"
+                        aria-label={`Remove option ${oIndex + 1}`}
+                        onClick={() => {
+                          const remaining = (question.options ?? []).filter(
+                            (_, i) => i !== oIndex
+                          );
+                          // Removing the correct option re-marks the first
+                          // survivor, so exactly-one-correct never breaks.
+                          if (
+                            option.isCorrect &&
+                            remaining.length > 0 &&
+                            !remaining.some(candidate => candidate.isCorrect)
+                          ) {
+                            remaining[0] = { ...remaining[0], isCorrect: true };
+                          }
+                          setQuestionAt(qIndex, { ...question, options: remaining });
+                        }}
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {(question.options ?? []).length < 6 && (
+                  <button
+                    type="button"
+                    className="btnGhost qAddOption"
+                    onClick={() =>
+                      setQuestionAt(qIndex, {
+                        ...question,
+                        options: [
+                          ...(question.options ?? []),
+                          { id: createQuestionId(), text: '', isCorrect: false },
+                        ],
+                      })
+                    }
+                  >
+                    <Plus size={13} /> Add option
+                  </button>
+                )}
+                <p className="fieldHelp">Tap the tick to mark the one correct option.</p>
+              </div>
+            )}
+          </div>
+        ))}
+
+        <button
+          type="button"
+          className="btnGhost"
+          onClick={() => setQuestions(prev => [...prev, newTextQuestion()])}
+        >
+          <Plus size={14} /> Add question
+        </button>
       </div>
 
       <div className="field">

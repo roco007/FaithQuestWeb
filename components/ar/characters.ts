@@ -22,11 +22,13 @@ export interface ARCharacterInstance {
   /**
    * Optional media controls for assets with their own timeline (cutout
    * videos). Called by the AR layer to hold frame 1 until the reveal, then
-   * play alongside the voiceover. No-op for procedural/GLB/photo assets.
+   * roll during it — alongside the voiceover, or with the clip's own audio
+   * when the video is the character's voice. No-op for procedural/GLB/photo
+   * assets.
    */
   play?: () => void;
   pause?: () => void;
-  /** Restart from frame 1 and play (used when the voiceover replays). */
+  /** Restart from frame 1 and play (used when the player hits Replay). */
   restart?: () => void;
   dispose: () => void;
 }

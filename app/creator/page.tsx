@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { Plus, ChevronUp, ChevronDown, Trash2, Pencil, Rocket, Share2, Wand2, Copy, Check, Link2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, Suspense, type ChangeEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Plus, ChevronUp, ChevronDown, Trash2, Pencil, Rocket, Share2, Wand2, Copy, Check, Link2, Download, Upload } from 'lucide-react';
 import { useHunt } from '../../context/HuntContext';
 import { useGame } from '../../context/GameContext';
 import type { HuntCharacter, HuntGame, HuntGameDraft } from '../../types/hunt';
 import { CharacterEditorModal } from '../../components/CharacterEditorModal';
 import { Modal } from '../../components/Modal';
 import { buildGameJoinUrl, buildGameShareMessage, currentOrigin } from '../../services/shareGame';
+import { downloadHuntGame, parseHuntGameJson, type ImportedHunt } from '../../services/huntFile';
 import { triggerHaptic } from '../../utils/sound';
 
 /** Character-type emoji, for the route list. */
@@ -27,6 +28,7 @@ const GLYPHS: Record<HuntCharacter['characterType'], string> = {
  *  Suspense boundary around it to prerender the shell — see the wrapper below. */
 function CreatorEditor() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const id = searchParams.get('id');
   const { createdGames, createGame } = useHunt();
   const { userLocation } = useGame();
@@ -50,6 +52,11 @@ function CreatorEditor() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [publishedGame, setPublishedGame] = useState<HuntGame | null>(null);
   const [copied, setCopied] = useState(false);
+  /** Hunt loaded from an uploaded JSON file; feeds the draft's hunt number. */
+  const [importedGame, setImportedGame] = useState<ImportedHunt | null>(null);
+  /** Success feedback for the JSON import (failures go to `error`). */
+  const [notice, setNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!existing) return;
@@ -94,6 +101,41 @@ function CreatorEditor() {
     setCharacters((prev) => renumber(prev.filter((_, i) => i !== index)));
   };
 
+  /**
+   * Loads a hunt exported as JSON (see services/huntFile) straight into the
+   * editor — details, route, discovery keys and sponsor choices all come from
+   * the file — so the creator can tweak or append characters and publish. The
+   * file's hunt number flows into the draft: publishing keeps it when free
+   * (so the same file works on any device) or replaces the local copy when a
+   * game with that number already exists here.
+   */
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // Allow re-selecting the same file after a fix.
+    if (!file) return;
+    try {
+      const imported = parseHuntGameJson(await file.text());
+      setTitle(imported.title);
+      setDescription(imported.description);
+      setCreatorName(imported.creatorName);
+      setEndAnnouncement(imported.endAnnouncement);
+      setCharacters(imported.characters);
+      setImportedGame(imported);
+      setError(null);
+      const replacesLocal = Boolean(imported.id && createdGames.some((g) => g.id === imported.id));
+      setNotice(
+        replacesLocal
+          ? `Loaded "${imported.title}" from ${file.name}. Hunt number ${imported.id} already exists on this device — publishing will replace that copy.`
+          : `Loaded "${imported.title}" from ${file.name} — ${imported.characters.length} character${imported.characters.length === 1 ? '' : 's'}. Review the route, make any edits, then publish.`
+      );
+      triggerHaptic('success');
+    } catch (err) {
+      setNotice(null);
+      setError(err instanceof Error ? err.message : 'Could not read that file.');
+      triggerHaptic('error');
+    }
+  };
+
   const handlePublish = async () => {
     if (saving) return;
     if (!title.trim()) {
@@ -111,9 +153,14 @@ function CreatorEditor() {
 
     setSaving(true);
     setError(null);
+    setNotice(null);
     try {
       const draft: HuntGameDraft = {
-        id: existing?.id,
+        // Edit mode keeps its number; an imported file keeps the number it
+        // carries (free → adopted, taken → replaces the local copy via the
+        // repository's upsert); a brand-new hunt gets the next free number.
+        id: existing?.id ?? importedGame?.id,
+        createdAt: importedGame?.createdAt,
         title,
         description,
         creatorName,
@@ -121,7 +168,15 @@ function CreatorEditor() {
         characters,
       };
       triggerHaptic('success');
-      setPublishedGame(await createGame(draft));
+      const game = await createGame(draft);
+      setPublishedGame(game);
+      // First publish: claim the edit URL so another Save updates this hunt
+      // instead of allocating a duplicate number. The JSON file is exported
+      // on demand from the share sheet's "Download JSON" button — never
+      // automatically.
+      if (!existing) {
+        router.replace(`/creator?id=${game.id}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save the game.');
       triggerHaptic('error');
@@ -181,9 +236,32 @@ function CreatorEditor() {
       </div>
 
       {error && <div className="banner bannerWarn">{error}</div>}
+      {notice && <div className="banner bannerInfo">{notice}</div>}
 
       <div className="card formCard">
-        <h2 className="sectionLabel">Game Details</h2>
+        <div className="sectionHeader" style={{ margin: '0 0 6px' }}>
+          <h2 className="sectionLabel" style={{ marginBottom: 0 }}>
+            Game Details
+          </h2>
+          {!existing && (
+            <button
+              type="button"
+              className="btnGhost"
+              onClick={() => fileInputRef.current?.click()}
+              title="Load a hunt exported as JSON"
+            >
+              <Upload size={15} />
+              Import JSON
+            </button>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: 'none' }}
+          onChange={handleImportFile}
+        />
         <div className="field">
           <label className="fieldLabel" htmlFor="game-title">
             Game Title *
@@ -291,6 +369,12 @@ function CreatorEditor() {
                       Camera asset
                     </span>
                   )}
+                  {(character.questions?.length ?? 0) > 0 && (
+                    <span className="pill" title="Questions asked before the reveal unlocks">
+                      {character.questions!.length} question
+                      {character.questions!.length === 1 ? '' : 's'}
+                    </span>
+                  )}
                   {index === 0 && (
                     <span className="pill" title="Give this key to players to start the hunt">
                       First key
@@ -379,7 +463,9 @@ function CreatorEditor() {
           <>
             <p className="shareLead">
               Your hunt is live. Send players the link below — opening it takes them straight to
-              this hunt and asks whether they want to join.
+              this hunt and asks whether they want to join. Download the JSON file to keep a
+              reusable copy you can upload on the Create Game screen later to reopen and edit
+              this hunt.
             </p>
 
             <label className="fieldLabel" htmlFor="share-link">
@@ -398,6 +484,15 @@ function CreatorEditor() {
               <button type="button" className="btnGhost" onClick={handleCopyShare}>
                 <Copy size={16} />
                 Copy full message
+              </button>
+              <button
+                type="button"
+                className="btnGhost"
+                onClick={() => downloadHuntGame(publishedGame)}
+                title="Save this hunt as a JSON file"
+              >
+                <Download size={16} />
+                Download JSON
               </button>
               <button
                 type="button"

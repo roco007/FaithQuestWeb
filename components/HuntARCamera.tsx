@@ -14,8 +14,9 @@ import {
   KeyRound,
   Sparkles,
   Volume2,
+  ListChecks,
 } from 'lucide-react';
-import { useHunt, DiscoverResult } from '../context/HuntContext';
+import { useHunt, DiscoverResult, assertPresentedKey } from '../context/HuntContext';
 import { useGame } from '../context/GameContext';
 import { useDeviceOrientation } from '../hooks/useDeviceOrientation';
 import {
@@ -25,15 +26,25 @@ import {
   AR_SCENE_DEPTH,
   ARViewportBox,
 } from '../utils/arPlacement';
-import { ARSceneView, AR_BUBBLE_FALLBACK_HEIGHT, AR_BUBBLE_TAIL_GAP } from './ar/ARSceneView';
+import {
+  ARSceneView,
+  AR_BUBBLE_FALLBACK_HEIGHT,
+  AR_BUBBLE_TAIL_GAP,
+  AR_BANNER_CARD_FALLBACK_HEIGHT,
+  AR_CARD_GAP,
+  AR_COMBINED_CARD_FALLBACK_HEIGHT,
+} from './ar/ARSceneView';
 import { getHuntCharacterMeta, getHuntCharacterSizing } from './ar/characters';
 import type { CharacterAsset } from '../services/characterAssets';
 import { getCharacterAssetSizing, loadCharacterAssets } from '../services/characterAssets';
+import type { SponsorBanner } from '../services/sponsorBanners';
+import { loadSponsorBanners } from '../services/sponsorBanners';
 import { KeyInHand } from './KeyInHand';
 import { LocationStatus } from './LocationStatus';
 import { formatDistance } from '../utils/geo';
 import { triggerHaptic, playSoundEffect } from '../utils/sound';
 import { speakClue, stopSpeaking } from '../utils/speech';
+import { isQuestionCorrect } from '../utils/huntQuestions';
 
 /** Milliseconds the player must hold aim + range before the character is sighted. */
 const LOCK_ON_MS = 900;
@@ -47,6 +58,8 @@ const TOP_HUD_RESERVE_PX = 104;
 const BOTTOM_HUD_RESERVE_PX = 128;
 /** Extra bottom reserve while the key form is docked over the frame. */
 const KEY_PANEL_RESERVE_PX = 208;
+/** Extra bottom reserve while the reveal-question panel is docked over the frame. */
+const QUIZ_PANEL_RESERVE_PX = 340;
 /**
  * Smallest share of the viewport height the character keeps for itself. The
  * head-bubble reserve is capped by it, so a very tall bubble on a short screen
@@ -75,11 +88,15 @@ type CameraState = 'starting' | 'active' | 'error';
  *  - `key`:     the sighted character stays on screen while the player presents
  *               the key received at the previous stop — nothing advances until
  *               that key matches;
- *  - `reveal`:  the right key was presented: the character's message, the key
- *               it hands over and the next target's hint float over its head
- *               (text + voice) until the player continues.
+ *  - `quiz`:    the key matched, but a character with reveal questions demands
+ *               them first — every question must be answered before anything
+ *               reveals, and the discovery is recorded only once they pass;
+ *  - `reveal`:  the key was presented and any question gate passed: the
+ *               character's message, the key it hands over and the next
+ *               target's hint float over its head (text + voice) until the
+ *               player continues.
  */
-type ARPhase = 'hunting' | 'key' | 'reveal';
+type ARPhase = 'hunting' | 'key' | 'quiz' | 'reveal';
 
 /** Spells a key out for the voice clue ("K7M2QX" → "K 7 M 2 Q X"). */
 function spellKey(key: string): string {
@@ -146,9 +163,10 @@ function RevealDetails({ result }: { result: DiscoverResult }) {
  *
  * Discovery flow (every step of it on the frame, see `ARPhase`): hold the
  * reticle on the character while inside its radius, present the key from the
- * previous stop in the docked form, and the character answers in text + voice
- * with the key and hint for its next target. Only a matching key advances the
- * hunt — until then the discovered character simply stays in view.
+ * previous stop in the docked form, pass the character's reveal questions when
+ * it has any, and only then the character answers in text + voice with the key
+ * and hint for its next target. Only a matching key and a passed question gate
+ * advance the hunt — until then the character simply stays in view.
  */
 export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCameraProps) {
   const { currentCharacter, discoverCurrentCharacter } = useHunt();
@@ -172,6 +190,16 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   const [keyInput, setKeyInput] = useState('');
   const [keyError, setKeyError] = useState<string | null>(null);
   const [presenting, setPresenting] = useState(false);
+  /** Index of the question on screen during the `quiz` phase. */
+  const [quizIndex, setQuizIndex] = useState(0);
+  /** Selected option (MCQ) for the current question. */
+  const [quizChoice, setQuizChoice] = useState<string | null>(null);
+  /** Typed answer for the current short-answer question. */
+  const [quizText, setQuizText] = useState('');
+  /** Why the last submission failed — shown under the current question. */
+  const [quizError, setQuizError] = useState<string | null>(null);
+  /** True while the final pass is being recorded (discovery in flight). */
+  const [quizChecking, setQuizChecking] = useState(false);
   /** Set once the right key is presented — drives the speech over the head. */
   const [reveal, setReveal] = useState<DiscoverResult | null>(null);
   /** Deployment-owned roster resolved from the selected character's asset ID. */
@@ -187,19 +215,23 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    */
   const [keyboardInset, setKeyboardInset] = useState(0);
   /**
-   * Height of the last bubble drawn over the character's head (0 until the
-   * first one is measured). Deliberately kept while no bubble is up, so the
-   * framing cannot oscillate between "bubble fits" and "bubble docked".
+   * Height of the last dialogue drawn over the character's head — the hint
+   * bubble, or the sponsor card when a banner owns that slot (0 until the
+   * first one is measured). Deliberately kept while no dialogue is up, so the
+   * framing cannot oscillate between "dialogue fits" and "dialogue docked".
    */
-  const [headBubbleHeightPx, setHeadBubbleHeightPx] = useState(0);
+  const [topDialogueHeightPx, setTopDialogueHeightPx] = useState(0);
+  /** Deployment-owned sponsor roster resolved from the marketing manifest. */
+  const [sponsorBanners, setSponsorBanners] = useState<SponsorBanner[]>([]);
 
   /**
-   * The bubble reports its own height as it renders. Only non-zero readings are
-   * stored: a hidden bubble must not wipe the estimate, or a bubble that needs
-   * the bottom dock would flicker back over the character on every frame.
+   * The bubble/card report their own height as they render. Only non-zero
+   * readings are stored: a hidden dialogue must not wipe the estimate, or one
+   * that needs the bottom dock would flicker back over the character on every
+   * frame.
    */
   const handleBubbleHeightChange = useCallback((heightPx: number) => {
-    if (heightPx > 0) setHeadBubbleHeightPx(heightPx);
+    if (heightPx > 0) setTopDialogueHeightPx(heightPx);
   }, []);
 
   // Track the viewport — framing maths and the canvas both use window pixels.
@@ -244,7 +276,37 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
       characterAssets.find(asset => asset.id === activeCharacter?.characterAssetId) ?? null,
     [activeCharacter?.characterAssetId, characterAssets]
   );
+  /**
+   * A cutout-video roster character speaks through its own clip: it carries the
+   * reveal audio, so the TTS voiceover stands down and the video's track plays
+   * instead.
+   */
+  const videoCharacterVoice = characterAsset?.kind === 'video';
+
   const renderCharacterType = characterAsset?.fallbackType ?? activeCharacter?.characterType;
+
+  // Sponsor banners are deployment-owned like the character roster: resolved
+  // from the manifest ID only, so a shared hunt can never inject a URL. A
+  // missing/failed roster simply leaves the standard bubble layout in place
+  // rather than breaking the hunt.
+  useEffect(() => {
+    let mounted = true;
+    loadSponsorBanners()
+      .then(banners => {
+        if (mounted) setSponsorBanners(banners);
+      })
+      .catch(loadError => {
+        console.warn('Could not load sponsor banners:', loadError);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const sponsorBanner = useMemo(
+    () => sponsorBanners.find(banner => banner.id === activeCharacter?.sponsorBannerId) ?? null,
+    [sponsorBanners, activeCharacter]
+  );
 
   const target = useMemo(() => {
     if (!activeCharacter) return null;
@@ -289,10 +351,15 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   const hudSafeTopPx = 16 + TOP_HUD_RESERVE_PX;
   /** Bottom of the usable area: above the docked hint/chips (and key form). */
   const hudSafeBottomPx = Math.max(
-    dims.height - (phase === 'key' ? KEY_PANEL_RESERVE_PX : BOTTOM_HUD_RESERVE_PX),
+    dims.height -
+      (phase === 'key'
+        ? KEY_PANEL_RESERVE_PX
+        : phase === 'quiz'
+          ? QUIZ_PANEL_RESERVE_PX
+          : BOTTOM_HUD_RESERVE_PX),
     hudSafeTopPx
   );
-  /** What may be given to the bubble while the model keeps a usable band. */
+  /** What may be given to the dialogue while the model keeps a usable band. */
   const availableHeadroomPx = Math.max(
     hudSafeBottomPx - hudSafeTopPx - dims.height * MIN_MODEL_BAND_FRACTION,
     0
@@ -303,21 +370,42 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     activeCharacter !== null &&
     (phase === 'hunting' ? Boolean(activeCharacter.hint) : phase === 'reveal');
   /**
-   * Headroom kept free above the character while a bubble is drawn over its
-   * head. The bubble hangs *above* the head, so without this the model would sit
-   * behind it — or the box would be clamped down over the model's body on a
-   * tall, close-up character (the bug this fixes). Zero when no bubble is
-   * expected, which hands the space back to the character.
+   * A selected banner takes over the slot above the character in every phase:
+   * the banner alone before the key is entered (hunting + key entry), the
+   * banner + hint card after it (reveal). The slot's occupants are mutually
+   * exclusive, so the sponsor card and the plain bubble never compete for
+   * headroom — and pre-key the card needs space even without a hint.
    */
-  const desiredHeadBubbleReservePx = wantsHeadBubble
-    ? Math.max(headBubbleHeightPx, AR_BUBBLE_FALLBACK_HEIGHT) + AR_BUBBLE_TAIL_GAP + 8
-    : 0;
-  const headBubbleReservePx = Math.min(desiredHeadBubbleReservePx, availableHeadroomPx);
+  const bannerCardWanted =
+    sponsorBanner !== null &&
+    cameraState === 'active' &&
+    activeCharacter !== null &&
+    (phase === 'hunting' || phase === 'key' || phase === 'quiz' || phase === 'reveal');
+  const wantsTopDialogue = bannerCardWanted || (sponsorBanner === null && wantsHeadBubble);
   /**
-   * False only when the bubble would cost the model more than it may lose: the
-   * reveal then docks into the bottom HUD instead of covering the character.
+   * Headroom kept free above the character for whatever occupies the slot.
+   * The dialogue hangs *above* the head, so without this the model would sit
+   * behind it — or the box would be clamped down over the model's body on a
+   * tall, close-up character (the bug this fixes). Zero when the slot is free,
+   * which hands the space back to the character.
    */
-  const headBubbleFits = headBubbleReservePx >= desiredHeadBubbleReservePx;
+  const desiredTopReservePx = !wantsTopDialogue
+    ? 0
+    : bannerCardWanted
+      ? Math.max(
+          topDialogueHeightPx,
+          phase === 'reveal' ? AR_COMBINED_CARD_FALLBACK_HEIGHT : AR_BANNER_CARD_FALLBACK_HEIGHT
+        ) +
+        AR_CARD_GAP +
+        8
+      : Math.max(topDialogueHeightPx, AR_BUBBLE_FALLBACK_HEIGHT) + AR_BUBBLE_TAIL_GAP + 8;
+  const topReservePx = Math.min(desiredTopReservePx, availableHeadroomPx);
+  /**
+   * False only when the dialogue would cost the model more than it may lose:
+   * the reveal then docks into the bottom HUD instead of covering the
+   * character.
+   */
+  const topDialogueFits = topReservePx >= desiredTopReservePx;
 
   /**
    * True once the player has identified this character on screen: the focus-lock
@@ -329,17 +417,17 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    * size breathes — very obvious at close range. Pinning it to a fixed frame
    * removes the shake entirely and keeps it steady while the key is typed.
    */
-  const identified = isLocking || phase === 'key' || phase === 'reveal';
+  const identified = isLocking || phase === 'key' || phase === 'quiz' || phase === 'reveal';
 
   /** The slice of the screen the character may occupy — HUD and bubble excluded. */
   const viewport = useMemo<ARViewportBox>(
     () => ({
       widthPx: dims.width,
       heightPx: dims.height,
-      safeTopPx: hudSafeTopPx + headBubbleReservePx,
+      safeTopPx: hudSafeTopPx + topReservePx,
       safeBottomPx: hudSafeBottomPx,
     }),
-    [dims, hudSafeTopPx, hudSafeBottomPx, headBubbleReservePx]
+    [dims, hudSafeTopPx, hudSafeBottomPx, topReservePx]
   );
 
   /**
@@ -406,6 +494,11 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     setReveal(null);
     setKeyInput('');
     setKeyError(null);
+    setQuizIndex(0);
+    setQuizChoice(null);
+    setQuizText('');
+    setQuizError(null);
+    setQuizChecking(false);
     setSpeaking(false);
     setVoiceCue(0);
     void orientation.requestOrientationPermission();
@@ -493,29 +586,83 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   }, [canLock, handleSighted]);
 
   /**
-   * Presents the typed key. The context throws on a mismatch and only records a
-   * discovery on a match, so this is the single gate that can move the hunt on.
+   * The reveal-question gate for the sighted character. Derived fresh each
+   * render: during `quiz` nothing has been recorded yet, so `currentCharacter`
+   * is still the character being questioned.
    */
-  const handlePresentKey = useCallback(async () => {
-    if (presenting || phase !== 'key') return;
-    setPresenting(true);
-    try {
-      const result = await discoverCurrentCharacter(keyInput);
-      if (!result) {
-        setKeyError('This hunt has nothing left to discover.');
-        return;
-      }
+  const quizQuestions = currentCharacter?.questions ?? [];
+  const quizQuestion = phase === 'quiz' ? (quizQuestions[quizIndex] ?? null) : null;
+  const quizIsLast = quizQuestion !== null && quizIndex + 1 >= quizQuestions.length;
+  const quizReady =
+    quizQuestion !== null &&
+    (quizQuestion.type === 'mcq' ? quizChoice !== null : quizText.trim().length > 0);
+
+  /** Back to question one for the next attempt at the gate. */
+  const resetQuiz = useCallback(() => {
+    setQuizIndex(0);
+    setQuizChoice(null);
+    setQuizText('');
+    setQuizError(null);
+    setQuizChecking(false);
+  }, []);
+
+  /**
+   * The single path into `reveal`: records nothing itself (the context call
+   * that produced `result` already did) and starts the dialogue's text + voice
+   * — unless the character is a cutout video with its own audio, which rolls
+   * with its own sound instead. The voice cue starts a cutout video from
+   * frame 1 either way.
+   */
+  const beginReveal = useCallback(
+    (result: DiscoverResult) => {
       setKeyInput('');
       setKeyError(null);
       setReveal(result);
       setPhase('reveal');
       triggerHaptic('success');
       playSoundEffect(result.isFinal ? 'level_up' : 'correct');
-      // Text + voice: the message appears over the character and is read aloud.
-      // The voice cue also starts a cutout video from frame 1 in sync.
-      setSpeaking(true);
       setVoiceCue(cue => cue + 1);
-      void speakClue(buildSpeech(result), { onDone: () => setSpeaking(false) });
+      if (!videoCharacterVoice) {
+        setSpeaking(true);
+        void speakClue(buildSpeech(result), { onDone: () => setSpeaking(false) });
+      }
+    },
+    [videoCharacterVoice]
+  );
+
+  /**
+   * Presents the typed key. On a character with reveal questions the key only
+   * earns the right to be asked — the discovery (and its reveal) stays locked
+   * until every question passes, so walking away mid-quiz re-arms the whole
+   * stop. Characters without questions go straight through: the context
+   * throws on a mismatch and records a discovery only on a match, so between
+   * them these are the only gates that can move the hunt on.
+   */
+  const handlePresentKey = useCallback(async () => {
+    if (presenting || phase !== 'key') return;
+    setPresenting(true);
+    try {
+      const character = currentCharacter;
+      if (!character) {
+        setKeyError('This hunt has nothing left to discover.');
+        return;
+      }
+      if (character.questions && character.questions.length > 0) {
+        // Same mismatch error as the context — but nothing recorded yet.
+        assertPresentedKey(character, keyInput);
+        setKeyError(null);
+        resetQuiz();
+        setPhase('quiz');
+        triggerHaptic('success');
+        playSoundEffect('correct');
+        return;
+      }
+      const result = await discoverCurrentCharacter(keyInput);
+      if (!result) {
+        setKeyError('This hunt has nothing left to discover.');
+        return;
+      }
+      beginReveal(result);
     } catch (err) {
       setKeyError(err instanceof Error ? err.message : 'That key does not match — try again.');
       triggerHaptic('warning');
@@ -523,16 +670,91 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     } finally {
       setPresenting(false);
     }
-  }, [presenting, phase, discoverCurrentCharacter, keyInput]);
+  }, [
+    presenting,
+    phase,
+    currentCharacter,
+    keyInput,
+    discoverCurrentCharacter,
+    resetQuiz,
+    beginReveal,
+  ]);
+
+  /**
+   * Submits the current question's answer. A wrong answer keeps the player on
+   * the same question; only once every question has passed is the discovery
+   * recorded and the reveal (dialogue, next key, video) started.
+   */
+  const handleQuizSubmit = useCallback(async () => {
+    if (quizChecking || phase !== 'quiz') return;
+    const question = quizQuestions[quizIndex];
+    if (!currentCharacter || !question) return;
+
+    if (!isQuestionCorrect(question, quizChoice, quizText)) {
+      setQuizError(
+        question.type === 'mcq'
+          ? 'Not the right choice — read the question once more and try again.'
+          : "That's not the answer — think it over and try again."
+      );
+      triggerHaptic('warning');
+      playSoundEffect('wrong');
+      return;
+    }
+
+    triggerHaptic('success');
+    setQuizError(null);
+    const isLast = quizIndex + 1 >= quizQuestions.length;
+    if (!isLast) {
+      playSoundEffect('correct');
+      setQuizIndex(quizIndex + 1);
+      setQuizChoice(null);
+      setQuizText('');
+      return;
+    }
+
+    // All questions passed — now, and only now, the hunt may advance.
+    setQuizChecking(true);
+    try {
+      const result = await discoverCurrentCharacter(keyInput);
+      if (!result) {
+        setQuizError('This hunt has nothing left to discover.');
+        triggerHaptic('warning');
+        playSoundEffect('wrong');
+        return;
+      }
+      beginReveal(result); // brings its own success sound and voice cue
+    } catch (err) {
+      // The key was checked when the quiz opened; this covers the hunt having
+      // moved underneath us (e.g. the character discovered elsewhere).
+      setQuizError(err instanceof Error ? err.message : 'Something went wrong — try again.');
+      triggerHaptic('warning');
+      playSoundEffect('wrong');
+    } finally {
+      setQuizChecking(false);
+    }
+  }, [
+    quizChecking,
+    phase,
+    currentCharacter,
+    quizQuestions,
+    quizIndex,
+    quizChoice,
+    quizText,
+    keyInput,
+    discoverCurrentCharacter,
+    beginReveal,
+  ]);
 
   /** Re-reads the character's message aloud (the native "replay voice clue"). */
   const handleReplayVoice = useCallback(() => {
     if (!reveal) return;
-    setSpeaking(true);
     // Restart the cutout video from frame 1 so it stays in sync with the voice.
     setVoiceCue(cue => cue + 1);
+    // A video character replays its own audio — no TTS voiceover on top.
+    if (videoCharacterVoice) return;
+    setSpeaking(true);
     void speakClue(buildSpeech(reveal), { onDone: () => setSpeaking(false) });
-  }, [reveal]);
+  }, [reveal, videoCharacterVoice]);
 
   /**
    * Dismisses the reveal. A non-final discovery re-arms the frame for the next
@@ -573,6 +795,11 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     if (phase === 'key' && activeCharacter) {
       return `Sighted ${activeCharacter.name} — present your key below`;
     }
+    if (phase === 'quiz' && activeCharacter) {
+      return `Key accepted — answer ${quizQuestions.length} question${
+        quizQuestions.length === 1 ? '' : 's'
+      } to unlock ${activeCharacter.name}`;
+    }
     if (cameraState === 'starting') return 'Starting camera…';
     if (cameraState === 'error') return 'Camera unavailable';
     if (!userLocation) return 'Acquiring GPS signal…';
@@ -603,10 +830,24 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    * bubble that cannot fit above the model counts as off screen, so the reveal
    * docks into the bottom HUD rather than being drawn over the character.
    */
-  const characterOnScreen = rendererAvailable && canvasFrame?.visible === true && headBubbleFits;
+  const characterOnScreen = rendererAvailable && canvasFrame?.visible === true && topDialogueFits;
 
-  /** True while the hunt clue floats over the model's head (else docks below). */
-  const showHeadHint = phase === 'hunting' && characterOnScreen && !!activeCharacter;
+  /**
+   * True while the hunt clue floats over the model's head (else docks below).
+   * A selected banner owns that slot instead — pre-key the card shows only the
+   * banner — so the clue stays in the bottom hint bar.
+   */
+  const showHeadHint =
+    phase === 'hunting' && characterOnScreen && !!activeCharacter && sponsorBanner === null;
+
+  /**
+   * The sponsor card owns the slot above the character while a banner is
+   * selected: banner alone before the key, banner + hint once revealed. At the
+   * reveal it appears only while the combined card fits on screen; docked, it
+   * reports 0 and the headroom estimate holds, so the layout settles instead
+   * of flickering.
+   */
+  const showSponsorCard = bannerCardWanted && (phase !== 'reveal' || characterOnScreen);
 
   /**
    * Bubble content over the model's head: the clue that points at the character
@@ -634,12 +875,16 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
           characterAsset={characterAsset}
           frame={canvasFrame}
           renderActive={true}
-          // Cutout videos hold frame 1 until the key is accepted; they roll only
-          // while the reveal voiceover is speaking, freeze when it ends, and
-          // restart from frame 1 on replay. (No TTS engine → no voiceover to
-          // sync to, so the clip loops until the player continues.)
+          // Cutout videos hold frame 1 until the key is accepted; during the
+          // reveal they roll while the voiceover speaks (freeze on end, restart
+          // from frame 1 on replay) — or for the whole reveal when the clip is
+          // its own voice, or when no TTS engine exists to sync to.
           mediaPlaying={
-            phase === 'reveal' && (speaking || typeof window === 'undefined' || !('speechSynthesis' in window))
+            phase === 'reveal' &&
+            (videoCharacterVoice ||
+              speaking ||
+              typeof window === 'undefined' ||
+              !('speechSynthesis' in window))
           }
           mediaRestartToken={voiceCue}
           hint={bubbleText}
@@ -647,6 +892,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
           label={reveal ? `${reveal.character.name} — ${speaking ? 'SPEAKING…' : 'SAYS'}` : null}
           bubbleExtra={reveal ? <RevealDetails result={reveal} /> : null}
           accent={characterMeta?.accent}
+          sponsorBanner={sponsorBanner}
+          showSponsorCard={showSponsorCard}
           onRendererStateChange={setRendererAvailable}
           onBubbleHeightChange={handleBubbleHeightChange}
         />
@@ -816,6 +1063,82 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
             <p className="arKeyHelper">
               {activeCharacter.name} stays right here until the right key is presented — the hunt
               does not move on without it.
+            </p>
+          </div>
+        )}
+
+        {/* Question gate: a character that has reveal questions keeps its
+            message and video locked until every one of them is answered —
+            the discovery itself is recorded only after the last pass. */}
+        {phase === 'quiz' && activeCharacter && quizQuestion && (
+          <div className="arQuizPanel">
+            <span className="arKeyPanelLabel">
+              <ListChecks size={12} /> Question {quizIndex + 1} of {quizQuestions.length} — answer
+              to unlock
+            </span>
+            <form
+              className="arQuizForm"
+              onSubmit={event => {
+                event.preventDefault();
+                if (quizReady) void handleQuizSubmit();
+              }}
+            >
+              <p className="arQuizPrompt">{quizQuestion.prompt}</p>
+              {quizQuestion.type === 'mcq' ? (
+                <div className="arQuizOptions" role="group" aria-label="Answer options">
+                  {(quizQuestion.options ?? []).map(option => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`arQuizOption${quizChoice === option.id ? ' arQuizOptionOn' : ''}`}
+                      aria-pressed={quizChoice === option.id}
+                      onClick={() => {
+                        setQuizChoice(option.id);
+                        if (quizError) setQuizError(null);
+                        triggerHaptic('light');
+                      }}
+                    >
+                      {option.text}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  className="arQuizInput"
+                  value={quizText}
+                  onChange={e => {
+                    setQuizText(e.target.value);
+                    if (quizError) setQuizError(null);
+                  }}
+                  placeholder="Type your answer"
+                  autoComplete="off"
+                  autoCapitalize="sentences"
+                  spellCheck={false}
+                  aria-label="Answer"
+                  autoFocus
+                />
+              )}
+              {quizError && (
+                <p className="arKeyError" role="alert">
+                  {quizError}
+                </p>
+              )}
+              <button
+                type="submit"
+                className="arKeySubmit arQuizSubmit"
+                disabled={!quizReady || quizChecking}
+              >
+                <Sparkles size={15} />
+                {quizChecking
+                  ? 'Checking…'
+                  : quizIsLast
+                    ? 'Unlock the reveal'
+                    : 'Submit answer'}
+              </button>
+            </form>
+            <p className="arKeyHelper">
+              {activeCharacter.name} reveals nothing — no message, no video — until every question
+              is answered correctly.
             </p>
           </div>
         )}

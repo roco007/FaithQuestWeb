@@ -154,15 +154,19 @@ function pickVideoSource(asset: CharacterAsset, video: HTMLVideoElement): string
  *
  * The clip starts paused on its first frame and stays there until the AR
  * layer calls `play()` — the camera holds the frozen frame while hunting and
- * during key entry, then rolls the clip with the reveal voiceover. The clip is
- * always muted and looped: it is a silent AR character, so a bundled audio
- * track (if any) never plays.
+ * during key entry, then plays once with the reveal and holds its final frame
+ * (nothing loops; only the reveal's Replay rewinds it). It plays with sound:
+ * a video character is its own voice, so its bundled audio track stands in
+ * for the hunt's TTS voiceover (which stays silent for it). If the browser
+ * blocks playback with audio, the attempt falls back to silent so the
+ * animation still rolls; the next play/restart retries with audio.
  */
 async function createVideoAsset(asset: CharacterAsset): Promise<ARCharacterInstance> {
   const video = document.createElement('video');
-  video.muted = true;
-  video.defaultMuted = true;
-  video.loop = true;
+  video.muted = false;
+  video.defaultMuted = false;
+  // Plays once per cue; Replay (or a fresh reveal) rewinds it via restart().
+  video.loop = false;
   video.autoplay = false;
   video.playsInline = true;
   video.setAttribute('playsinline', '');
@@ -203,9 +207,24 @@ async function createVideoAsset(asset: CharacterAsset): Promise<ARCharacterInsta
     } catch {
       /* ignore seek failures */
     }
+    // Always try with audio first: the reveal follows the key tap, which is
+    // the user gesture browsers require before sound may play.
+    video.muted = false;
     try {
       const result = video.play();
-      if (result instanceof Promise) result.catch(() => {});
+      if (result instanceof Promise) {
+        result.catch(() => {
+          // Autoplay-with-sound can still be blocked — roll silently rather
+          // than hold a frozen frame; the next play/restart retries with audio.
+          video.muted = true;
+          try {
+            const retry = video.play();
+            if (retry instanceof Promise) retry.catch(() => {});
+          } catch {
+            /* ignore */
+          }
+        });
+      }
     } catch {
       /* autoplay policies may delay playback until the next gesture */
     }
