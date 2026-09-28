@@ -1,7 +1,7 @@
 import type { HuntCharacterType } from '../types/hunt';
 import type { ARCharacterSizing } from '../utils/arPlacement';
 
-export type CharacterAssetKind = 'model' | 'image';
+export type CharacterAssetKind = 'model' | 'image' | 'video';
 
 /** One deploy-time camera asset that a hunt creator may place on the map. */
 export interface CharacterAsset {
@@ -11,6 +11,12 @@ export interface CharacterAsset {
   kind: CharacterAssetKind;
   /** Same-origin public path. The manifest validator rejects remote URLs. */
   src: string;
+  /**
+   * Optional second file for `video` assets (e.g. an HEVC `.mov` playing the
+   * same clip for iOS Safari, which cannot play VP9 alpha). Same-origin and
+   * validated like `src`; ignored for other kinds.
+   */
+  fallbackSrc?: string;
   /** Built-in character used for the pin, accent, and failed-load fallback. */
   fallbackType: HuntCharacterType;
   accent: string;
@@ -28,6 +34,7 @@ const FALLBACK_TYPES: HuntCharacterType[] = ['guardian', 'angel', 'monk', 'flame
 const ASSET_EXTENSIONS: Record<CharacterAssetKind, string[]> = {
   model: ['glb'],
   image: ['png', 'webp', 'jpg', 'jpeg'],
+  video: ['webm', 'mp4', 'mov'],
 };
 const MANIFEST_URL = '/characters/manifest.json';
 const SAFE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -78,7 +85,7 @@ function parseManifest(value: unknown): CharacterAsset[] {
     }
     seen.add(id);
     const kind = entry.kind;
-    if (kind !== 'model' && kind !== 'image') {
+    if (kind !== 'model' && kind !== 'image' && kind !== 'video') {
       throw new Error(`Invalid kind for character roster entry “${id}”.`);
     }
     const fallbackType = entry.fallbackType;
@@ -93,6 +100,11 @@ function parseManifest(value: unknown): CharacterAsset[] {
       description: typeof entry.description === 'string' ? entry.description.trim() : '',
       kind,
       src: safeAssetPath(entry.src, kind, id),
+      ...(kind === 'video' &&
+      typeof entry.fallbackSrc === 'string' &&
+      entry.fallbackSrc.trim()
+        ? { fallbackSrc: safeAssetPath(entry.fallbackSrc, 'video', id) }
+        : {}),
       fallbackType: fallbackType as HuntCharacterType,
       accent,
       realHeightM: positiveNumber(entry.realHeightM, `realHeightM for ${id}`, 20),

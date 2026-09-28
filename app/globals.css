@@ -427,7 +427,7 @@ select:focus-visible {
 }
 
 /* ==========================================================================
-   Leaflet overrides + quest map layout
+   Map provider overrides + quest map layout
    ========================================================================== */
 
 .mapCanvas {
@@ -504,6 +504,19 @@ select:focus-visible {
   margin: 12px 14px;
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* --- Google Maps -----------------------------------------------------------
+   The map is instantiated with `colorScheme: DARK`, so the basemap and Google's
+   own controls are already themed and must NOT be filtered — the Maps ToS
+   forbid obscuring the Google logo/attribution, which is exactly what an
+   `invert()` on the tile layer would do. Only the app's own DOM pins sit
+   outside that, and they are built from the same artwork as the Leaflet ones. */
+
+.mapCanvas .gmp-advanced-marker {
+  /* The app's pins are interactive (tap to select a node / drag the character),
+     so advertise that. Sizing and centring are handled in `mapPins.ts`. */
+  cursor: pointer;
 }
 
 /* --- Empty states ------------------------------------------------------- */
@@ -1008,6 +1021,18 @@ select:focus-visible {
   background-color: rgba(15, 23, 42, 0.82);
 }
 
+.rosterPreviewVideo {
+  background-color: rgba(15, 23, 42, 0.82);
+  padding: 0;
+}
+
+.rosterPreviewClip {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .rosterCopy {
   min-width: 0;
   display: flex;
@@ -1382,6 +1407,123 @@ select:focus-visible {
   border-radius: var(--radius-sm);
   overflow: hidden;
   margin-bottom: 16px;
+}
+
+/* --- Place search (creator) ---------------------------------------------- */
+
+.placeSearch {
+  position: relative;
+  /* Anchors the results list, and lifts it above the map below. */
+  z-index: 5;
+  margin-bottom: 12px;
+}
+
+.placeSearchField {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.placeSearchIcon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.placeSearchInput {
+  /* Room for the leading icon and the trailing spinner. */
+  padding-left: 34px;
+  padding-right: 34px;
+}
+
+.placeSearchSpinner {
+  position: absolute;
+  right: 12px;
+  color: var(--sky);
+  animation: placeSearchSpin 0.9s linear infinite;
+}
+
+@keyframes placeSearchSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.placeSearchResults {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 210px;
+  overflow-y: auto;
+  /* Sits over the map, so it needs an opaque surface and a real edge. */
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.placeSearchResult {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.placeSearchResult.isActive,
+.placeSearchResult:hover {
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.placeSearchPin {
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--sky);
+}
+
+.placeSearchText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.placeSearchTitle {
+  font-size: 13.5px;
+  font-weight: 600;
+  /* Long place names must not widen the list past the field. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeSearchSubtitle {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeSearchEmpty {
+  padding: 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* Confirmation of what search just placed, cleared by any manual adjustment. */
+.placeSearchPicked {
+  margin: -4px 0 10px;
+  font-size: 11.5px;
+  color: var(--sky);
 }
 
 .coordsReadout {

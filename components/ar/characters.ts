@@ -19,6 +19,15 @@ export interface ARCharacterInstance {
   realHeightM: number;
   /** Called every render frame with elapsed seconds. */
   update: (elapsed: number) => void;
+  /**
+   * Optional media controls for assets with their own timeline (cutout
+   * videos). Called by the AR layer to hold frame 1 until the reveal, then
+   * play alongside the voiceover. No-op for procedural/GLB/photo assets.
+   */
+  play?: () => void;
+  pause?: () => void;
+  /** Restart from frame 1 and play (used when the voiceover replays). */
+  restart?: () => void;
   dispose: () => void;
 }
 

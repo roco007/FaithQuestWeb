@@ -8,6 +8,7 @@ import type { CharacterAsset } from '../services/characterAssets';
 import { loadCharacterAssets } from '../services/characterAssets';
 import { Modal } from './Modal';
 import { CharacterPinMap } from './CharacterPinMap';
+import { PlaceSearchBox } from './PlaceSearchBox';
 import { generateCharacterKey } from '../utils/keys';
 
 const CHARACTER_TYPES: { value: HuntCharacterType; label: string; glyph: string }[] = [
@@ -70,7 +71,27 @@ export function CharacterEditorModal({
   const [altitudeMeters, setAltitudeMeters] = useState(initial?.altitudeMeters ?? 0);
   const [radiusMeters, setRadiusMeters] = useState(initial?.radiusMeters ?? 25);
   const [characterKey, setCharacterKey] = useState(initial?.key ?? generateCharacterKey());
+  // Name of the place chosen via search, shown back so the creator can see what
+  // they picked; cleared as soon as they adjust the pin by hand.
+  const [placeLabel, setPlaceLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Single entry point for moving the character, shared by the map (click and
+   * drag) and place search so both round to the same precision and keep the
+   * text fields in step with the numeric state.
+   */
+  const applyCoordinates = (lat: number, lon: number) => {
+    const la = Number(lat.toFixed(6));
+    const lo = Number(lon.toFixed(6));
+    setLatitude(la);
+    setLongitude(lo);
+    setLatText(String(la));
+    setLonText(String(lo));
+    // A manual adjustment supersedes whatever search had placed, so the
+    // "Placed at …" confirmation stops claiming a place that no longer applies.
+    setPlaceLabel(null);
+  };
 
   // The roster is deployment-owned and cached for the browser session. Keep the
   // existing procedural character available if the manifest or an asset fails.
@@ -270,7 +291,9 @@ export function CharacterEditorModal({
                     }}
                   >
                     <span
-                      className={`rosterPreview rosterPreview${asset.kind === 'model' ? 'Model' : 'Image'}`}
+                      className={`rosterPreview rosterPreview${
+                        asset.kind === 'model' ? 'Model' : asset.kind === 'video' ? 'Video' : 'Image'
+                      }`}
                       style={
                         asset.kind === 'image'
                           ? { backgroundImage: `url(${JSON.stringify(asset.src).slice(1, -1)})` }
@@ -278,12 +301,29 @@ export function CharacterEditorModal({
                       }
                       aria-hidden="true"
                     >
-                      {asset.kind === 'image' ? null : <Box size={30} />}
+                      {asset.kind === 'image' ? null : asset.kind === 'video' ? (
+                        <video
+                          className="rosterPreviewClip"
+                          src={asset.src}
+                          muted
+                          loop
+                          playsInline
+                          preload="metadata"
+                          tabIndex={-1}
+                        />
+                      ) : (
+                        <Box size={30} />
+                      )}
                     </span>
                     <span className="rosterCopy">
                       <strong>{asset.name}</strong>
                       <span className="rosterKind">
-                        {asset.kind === 'model' ? '3D model' : 'Photo cutout'} · {asset.realHeightM}m
+                        {asset.kind === 'model'
+                          ? '3D model'
+                          : asset.kind === 'video'
+                            ? 'Cutout video'
+                            : 'Photo cutout'}{' '}
+                        · {asset.realHeightM}m
                       </span>
                       {asset.description && <span>{asset.description}</span>}
                     </span>
@@ -301,8 +341,19 @@ export function CharacterEditorModal({
 
       <div className="field">
         <span className="fieldLabel">
-          <MapPin size={12} /> Placement — click the map, drag the pin, or type coordinates below
+          <MapPin size={12} /> Placement — search a place, click the map, drag the pin, or
+          type coordinates below
         </span>
+        <PlaceSearchBox
+          id="char-place-search"
+          placeholder="Search for a place or address…"
+          bias={currentLocation}
+          onSelect={(lat, lon, label) => {
+            applyCoordinates(lat, lon);
+            setPlaceLabel(label);
+          }}
+        />
+        {placeLabel && <div className="placeSearchPicked">Placed at {placeLabel}</div>}
         <CharacterPinMap
           latitude={latitude}
           longitude={longitude}
@@ -310,14 +361,7 @@ export function CharacterEditorModal({
           characterType={characterType}
           name={name || 'New character'}
           currentLocation={currentLocation}
-          onCoordinatesChange={(lat, lon) => {
-            const la = Number(lat.toFixed(6));
-            const lo = Number(lon.toFixed(6));
-            setLatitude(la);
-            setLongitude(lo);
-            setLatText(String(la));
-            setLonText(String(lo));
-          }}
+          onCoordinatesChange={applyCoordinates}
         />
         <div className="formRow">
           <div className="field">

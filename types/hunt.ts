@@ -26,7 +26,7 @@ export interface HuntCharacter {
   characterType: HuntCharacterType;
   /**
    * Optional ID from `public/characters/manifest.json`. When present, the AR
-   * camera renders that photo cutout or GLB model; `characterType` remains its
+   * camera renders that cutout video, photo cutout, or GLB model; `characterType` remains its
    * map pin, accent, and procedural fallback. Asset paths are deliberately not
    * stored in a hunt so shared hunts cannot inject arbitrary URLs.
    */

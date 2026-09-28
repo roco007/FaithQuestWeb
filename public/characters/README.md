@@ -2,7 +2,7 @@
 
 This folder is deployed with the web app. Creators select entries from
 `manifest.json` when they add or edit a hunt character; players then see the
-selected model or transparent photo through the hunt camera.
+selected model, transparent photo, or cutout video through the hunt camera.
 
 ## Supported files
 
@@ -11,6 +11,12 @@ selected model or transparent photo through the hunt camera.
 - **Photo cutout:** one `.png`, `.webp`, `.jpg`, or `.jpeg` with transparency for
   PNG/WebP. JPEG is supported for ordinary rectangular images but cannot have a
   transparent background.
+- **Cutout video:** one VP9 `.webm` exported **with an alpha channel**
+  (transparent background — e.g. `yuva420p`, not `yuv420p`). The clip is muted
+  and looped in the camera; any bundled audio track never plays. iOS Safari
+  cannot play VP9 alpha, so a video entry may name an HEVC-with-alpha
+  `.mov`/`.mp4` twin in `fallbackSrc` for iPhones. Set `aspectRatio` to the
+  full frame width divided by height (e.g. `0.5625` for 720×1280).
 
 Keep models mobile-friendly (preferably under 8 MB, 5,000–30,000 triangles).
 The app automatically centres every model horizontally, puts its lowest point

@@ -24,6 +24,18 @@
       "realHeightM": 1.8,
       "aspectRatio": 1,
       "attribution": "Zsky"
+    },
+    {
+      "id": "video-test-transparent",
+      "name": "Transparent Video Test",
+      "description": "Test cutout video clip. Loops silently through the hunt camera.",
+      "kind": "video",
+      "src": "/characters/video_test_transparent.webm",
+      "fallbackType": "guardian",
+      "accent": "#38bdf8",
+      "realHeightM": 1.7,
+      "aspectRatio": 0.5625,
+      "attribution": "Test clip"
     }
   ]
 }
