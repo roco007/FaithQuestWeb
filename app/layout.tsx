@@ -2,7 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 // Leaflet's base stylesheet is required for pane positioning and tile transforms.
 // It must be imported here (module-scope CSS) — not inside the dynamic import in
-// GameMap.tsx, since that module only loads in the browser after hydration.
+// LeafletGameMap.tsx, since that module only loads in the browser after hydration.
+// It is imported unconditionally so the keyless fallback provider is styled even
+// when Google Maps is the one actually rendering.
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
 import { Providers, SecureContextBanner } from "@/components/Providers";

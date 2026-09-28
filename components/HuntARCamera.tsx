@@ -178,6 +178,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   const [characterAssets, setCharacterAssets] = useState<CharacterAsset[]>([]);
   /** True while the reveal is being read aloud (drives the replay button). */
   const [speaking, setSpeaking] = useState(false);
+  /** Bumped each time the reveal voiceover (re)starts, to cue media assets. */
+  const [voiceCue, setVoiceCue] = useState(0);
   /**
    * Height of the on-screen keyboard covering the docked key form. Mobile
    * browsers shrink the *visual* viewport without resizing the layout one, so
@@ -348,8 +350,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     () =>
       placement && characterSizing
         ? computeARCanvasFrame(placement, characterSizing, viewport, AR_SCENE_DEPTH, {
-            identified,
-          })
+          identified,
+        })
         : null,
     [placement, characterSizing, viewport, identified]
   );
@@ -376,7 +378,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
+        await videoRef.current.play().catch(() => { });
       }
       setCameraState('active');
     } catch (err) {
@@ -405,6 +407,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     setKeyInput('');
     setKeyError(null);
     setSpeaking(false);
+    setVoiceCue(0);
     void orientation.requestOrientationPermission();
     void startCamera();
     return () => {
@@ -509,7 +512,9 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
       triggerHaptic('success');
       playSoundEffect(result.isFinal ? 'level_up' : 'correct');
       // Text + voice: the message appears over the character and is read aloud.
+      // The voice cue also starts a cutout video from frame 1 in sync.
       setSpeaking(true);
+      setVoiceCue(cue => cue + 1);
       void speakClue(buildSpeech(result), { onDone: () => setSpeaking(false) });
     } catch (err) {
       setKeyError(err instanceof Error ? err.message : 'That key does not match — try again.');
@@ -524,6 +529,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   const handleReplayVoice = useCallback(() => {
     if (!reveal) return;
     setSpeaking(true);
+    // Restart the cutout video from frame 1 so it stays in sync with the voice.
+    setVoiceCue(cue => cue + 1);
     void speakClue(buildSpeech(reveal), { onDone: () => setSpeaking(false) });
   }, [reveal]);
 
@@ -536,6 +543,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     if (!reveal) return;
     stopSpeaking();
     setSpeaking(false);
+    setVoiceCue(0);
     onDiscoveryComplete?.(reveal);
     if (reveal.isFinal) return;
     setReveal(null);
@@ -626,6 +634,14 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
           characterAsset={characterAsset}
           frame={canvasFrame}
           renderActive={true}
+          // Cutout videos hold frame 1 until the key is accepted; they roll only
+          // while the reveal voiceover is speaking, freeze when it ends, and
+          // restart from frame 1 on replay. (No TTS engine → no voiceover to
+          // sync to, so the clip loops until the player continues.)
+          mediaPlaying={
+            phase === 'reveal' && (speaking || typeof window === 'undefined' || !('speechSynthesis' in window))
+          }
+          mediaRestartToken={voiceCue}
           hint={bubbleText}
           speaker={showHeadHint ? activeCharacter.name : null}
           label={reveal ? `${reveal.character.name} — ${speaking ? 'SPEAKING…' : 'SAYS'}` : null}
@@ -653,11 +669,10 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
             <MapPin size={10} />
             <span>
               {placement
-                ? `${formatDistance(placement.distanceMeters)} • ${
-                    placement.isWithinAimCone
-                      ? 'on target'
-                      : `${Math.abs(Math.round(placement.relativeAzimuthDeg))}° off axis`
-                  }`
+                ? `${formatDistance(placement.distanceMeters)} • ${placement.isWithinAimCone
+                  ? 'on target'
+                  : `${Math.abs(Math.round(placement.relativeAzimuthDeg))}° off axis`
+                }`
                 : 'locating…'}
             </span>
           </div>
@@ -696,9 +711,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
       {phase === 'hunting' && (
         <div className="arReticleWrap" aria-hidden="true">
           <div
-            className={`arReticle${canLock ? ' arReticleActive' : ''}${
-              isLocking ? ' arReticleLocking' : ''
-            }`}
+            className={`arReticle${canLock ? ' arReticleActive' : ''}${isLocking ? ' arReticleLocking' : ''
+              }`}
           >
             <span className="arCorner arCornerTL" />
             <span className="arCorner arCornerTR" />
@@ -830,7 +844,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
                 onClick={handleReplayVoice}
               >
                 <Volume2 size={15} />
-                {speaking ? 'Speaking…' : 'Replay voice'}
+                {speaking ? 'Speaking…' : 'Replay message'}
               </button>
               <button
                 type="button"

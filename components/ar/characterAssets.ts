@@ -120,7 +120,145 @@ async function createImageAsset(asset: CharacterAsset): Promise<ARCharacterInsta
   };
 }
 
-/** Builds a creator-selected photo cutout or GLB for the live AR camera. */
+/** MIME hint used to pick the video source the browser can actually play. */
+function videoMime(path: string): string {
+  const extension = path.toLowerCase().split('.').pop() ?? '';
+  if (extension === 'mov') return 'video/quicktime';
+  if (extension === 'mp4') return 'video/mp4';
+  return 'video/webm';
+}
+
+/**
+ * Picks the first video source the browser reports it can play — typically the
+ * VP9 `.webm` everywhere except iOS Safari, which falls through to the HEVC
+ * `.mov`/`.mp4` twin named in `fallbackSrc`.
+ */
+function pickVideoSource(asset: CharacterAsset, video: HTMLVideoElement): string {
+  if (asset.fallbackSrc) {
+    const candidates = [asset.src, asset.fallbackSrc];
+    for (const candidate of candidates) {
+      try {
+        if (video.canPlayType(videoMime(candidate)) !== '') return candidate;
+      } catch {
+        /* ignore and keep scanning */
+      }
+    }
+  }
+  return asset.src;
+}
+
+/**
+ * Plays a transparent cutout video (VP9 WebM with alpha, optionally with an
+ * HEVC `.mov` twin for iOS Safari) as a camera-facing plane, bottom-anchored
+ * at y=0 — the animated sibling of `createImageAsset`.
+ *
+ * The clip starts paused on its first frame and stays there until the AR
+ * layer calls `play()` — the camera holds the frozen frame while hunting and
+ * during key entry, then rolls the clip with the reveal voiceover. The clip is
+ * always muted and looped: it is a silent AR character, so a bundled audio
+ * track (if any) never plays.
+ */
+async function createVideoAsset(asset: CharacterAsset): Promise<ARCharacterInstance> {
+  const video = document.createElement('video');
+  video.muted = true;
+  video.defaultMuted = true;
+  video.loop = true;
+  video.autoplay = false;
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  video.preload = 'auto';
+  video.crossOrigin = 'anonymous';
+  video.src = pickVideoSource(asset, video);
+
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('error', onError);
+    };
+    const onCanPlay = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`Could not load cutout video “${asset.src}”.`));
+    };
+    video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('error', onError);
+    video.load();
+  });
+
+  // Hold the first frame: the AR layer plays only once the key is accepted.
+  video.pause();
+  try {
+    video.currentTime = 0;
+  } catch {
+    /* seeking before first frame is advisory only */
+  }
+
+  const playVideo = () => {
+    try {
+      if (video.ended) video.currentTime = 0;
+    } catch {
+      /* ignore seek failures */
+    }
+    try {
+      const result = video.play();
+      if (result instanceof Promise) result.catch(() => {});
+    } catch {
+      /* autoplay policies may delay playback until the next gesture */
+    }
+  };
+
+  const texture = new THREE.VideoTexture(video);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+
+  const group = new THREE.Group();
+  const geometry = new THREE.PlaneGeometry(asset.aspectRatio, CHARACTER_ASSET_NATURAL_HEIGHT);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.02,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const plane = new THREE.Mesh(geometry, material);
+  plane.position.y = CHARACTER_ASSET_NATURAL_HEIGHT / 2;
+  group.add(plane);
+  return {
+    group,
+    naturalHeight: CHARACTER_ASSET_NATURAL_HEIGHT,
+    realHeightM: asset.realHeightM,
+    update: () => {},
+    play: playVideo,
+    pause: () => {
+      video.pause();
+    },
+    restart: () => {
+      try {
+        video.currentTime = 0;
+      } catch {
+        /* ignore seek failures */
+      }
+      playVideo();
+    },
+    dispose: () => {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      disposeObject(group);
+    },
+  };
+}
+
+/** Builds a creator-selected cutout video, photo cutout, or GLB for the live AR camera. */
 export function createARCharacterAsset(asset: CharacterAsset): Promise<ARCharacterInstance> {
-  return asset.kind === 'model' ? createModelAsset(asset) : createImageAsset(asset);
+  if (asset.kind === 'model') return createModelAsset(asset);
+  if (asset.kind === 'video') return createVideoAsset(asset);
+  return createImageAsset(asset);
 }

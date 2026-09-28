@@ -40,6 +40,18 @@ interface ARSceneViewProps {
   /** When false the GL loop idles (camera still shows underneath). */
   renderActive: boolean;
   /**
+   * Whether media assets (cutout videos) may play. False while hunting or
+   * entering the key, so the clip holds its first frame; true once the key
+   * is accepted and the voiceover starts.
+   */
+  mediaPlaying?: boolean;
+  /**
+   * Bumped every time the voiceover is (re)started so a cutout video restarts
+   * from frame 1 in sync with what the character says. Ignored unless
+   * `mediaPlaying` is true.
+   */
+  mediaRestartToken?: number;
+  /**
    * Text of the dialogue box over the character's head — the hint pointing at
    * it while hunting, or what it says once its key has been accepted.
    */
@@ -89,6 +101,8 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
   characterAsset = null,
   frame,
   renderActive,
+  mediaPlaying = false,
+  mediaRestartToken = 0,
   hint,
   speaker,
   label,
@@ -105,6 +119,13 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
   activeRef.current = renderActive;
   const typeRef = useRef(characterType);
   typeRef.current = characterType;
+  /** Latest media gate, mirrored into refs so async loads never go stale. */
+  const mediaPlayingRef = useRef(mediaPlaying);
+  mediaPlayingRef.current = mediaPlaying;
+  const mediaRestartTokenRef = useRef(mediaRestartToken);
+  mediaRestartTokenRef.current = mediaRestartToken;
+  /** Last restart token already applied to the installed instance. */
+  const appliedRestartRef = useRef<number | null>(null);
   /** Latest bubble-height reporter, so the ref callback never goes stale. */
   const onBubbleHeightRef = useRef(onBubbleHeightChange);
   onBubbleHeightRef.current = onBubbleHeightChange;
@@ -152,6 +173,10 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
       replacement.group.visible = false;
       characterRef.current = replacement;
       motionRef.current.ready = false;
+      // A freshly installed clip starts paused; sync it with the reveal gate.
+      appliedRestartRef.current = mediaRestartTokenRef.current;
+      if (mediaPlayingRef.current) replacement.play?.();
+      else replacement.pause?.();
     };
 
     if (characterAsset) {
@@ -173,6 +198,26 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
       cancelled = true;
     };
   }, [sceneReady, characterType, characterAsset]);
+
+  // Gate cutout-video playback on the voiceover: paused on frame 1 while
+  // hunting or entering the key, rolling only while the reveal voice speaks,
+  // frozen on the last shown frame when it ends. A restart token rewinds the
+  // clip so replaying the voiceover replays the video from the top in sync.
+  useEffect(() => {
+    const current = characterRef.current;
+    if (!current) return;
+    if (!mediaPlaying) {
+      current.pause?.();
+      return;
+    }
+    if (appliedRestartRef.current !== mediaRestartToken) {
+      appliedRestartRef.current = mediaRestartToken;
+      if (current.restart) current.restart();
+      else current.play?.();
+      return;
+    }
+    current.play?.();
+  }, [mediaPlaying, mediaRestartToken]);
 
   // --- Renderer + render loop ----------------------------------------------
   useEffect(() => {

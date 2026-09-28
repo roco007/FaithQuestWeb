@@ -27,7 +27,7 @@ npm start
 
 | Route        | Purpose                                                          |
 | ------------ | ---------------------------------------------------------------- |
-| `/`          | Quest map — Leaflet map, live GPS, proximity radar, clue puzzles  |
+| `/`          | Quest map — live GPS, proximity radar, clue puzzles            |
 | `/games`     | Treasure hunts: create, share by code, join, and play             |
 | `/creator`   | Hunt authoring: place characters on a map, design clues           |
 | `/inventory` | Pilgrim backpack — collected relics                               |
@@ -37,7 +37,7 @@ npm start
 
 | Concern     | Native (Expo)                | Web port                                            |
 | ----------- | ---------------------------- | --------------------------------------------------- |
-| Map         | `react-native-maps` + Google | Leaflet + OpenStreetMap tiles, CSS-darkened (no API key) |
+| Map         | `react-native-maps` + Google | Google Maps JS API when a key is set, else keyless Leaflet + OpenStreetMap |
 | GPS         | `expo-location` watch        | Browser Geolocation API (`watchPosition`, one app-wide watch) |
 | AR camera   | `expo-camera` + `expo-gl`    | `getUserMedia` rear-camera feed                    |
 | AR sensors  | `expo-location` heading + `expo-sensors` accelerometer | `DeviceOrientation` events (iOS permission prompt honoured) |
@@ -205,20 +205,85 @@ If it still stalls, the hunt screens say so out loud:
   fix age never move, the cause is the page, not the game: open it over HTTPS
   (see *Geolocation requires HTTPS* above) and allow location access.
 
+## Map providers
+
+Every map in the app (the quest map and the creator's pin-placement picker) is
+rendered by whichever provider is available:
+
+| Provider | When | Why |
+| --- | --- | --- |
+| **Google Maps JS API** | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is set | Native dark styling, vector tiles, draggable pins, better zoomed-in detail |
+| **Leaflet + OpenStreetMap** | no key set, *or* Google fails to start | Keyless, so a fresh clone works immediately and a bad key never yields a blank map |
+
+`components/GameMap.tsx` and `components/CharacterPinMap.tsx` are thin
+dispatchers over `GoogleGameMap` / `GoogleCharacterPinMap` and
+`LeafletGameMap` / `LeafletCharacterPinMap`. Both providers implement the same
+props and the same imperative handle (`components/mapTypes.ts`), so no page or
+component knows which one is mounted. The Google provider also hands control
+back to Leaflet at runtime if the script fails to load, the key is rejected, or
+the map reports that advanced markers are unavailable — a blank map would make
+the whole quest unplayable, so that path is a first-class feature rather than a
+stopgap.
+
+### Enabling Google Maps
+
+1. Enable the **Maps JavaScript API** *and* the **Places API (New)** on a Google
+   Cloud project (the project needs billing enabled; Google grants a monthly
+   free credit, after which map loads are charged). The map renders with the
+   first; place search needs the second — without it, search silently falls
+   back to the keyless Nominatim/Photon cascade, which cannot fuzzy-match
+   business names like google.com/maps does.
+2. Create an API key and **restrict it**:
+   - *API restriction* → **Maps JavaScript API** + **Places API (New)**.
+   - *Website restriction* → the origins you serve from, e.g.
+     `http://localhost:3000/*` and your production domain.
+   - The map key is visible in the client bundle by design, so the
+     restriction — not secrecy — is what protects your quota. Place search
+     goes through the same-origin `/api/places-search` proxy, so the key
+     authorising it is never exposed beyond what the map already needs.
+     Never ship an unrestricted key.
+3. `cp .env.example .env.local` and set `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
+   `.env.local` is git-ignored; `.env.example` is the committed template.
+4. Optionally set `NEXT_PUBLIC_GOOGLE_MAPS_API_MAP_ID`. Advanced markers (the
+   app's HTML pins) require a map ID and refuse to load without one; the
+   default is Google's `DEMO_MAP_ID`, which is fine for testing but uses a
+   reduced-POI style. Create a real map ID (Map type: JavaScript) for
+   production.
+
+Testing on a phone via `npm run dev:tunnel`? The Cloudflare hostname is
+different on every run, so a referrer-restricted key will be rejected — set
+the website restriction to `*` while testing and restore it afterwards.
+
+### How the two providers are kept honest
+
+- `components/mapPins.ts` holds the marker artwork once. Both providers render
+  the same HTML, so a pin change cannot drift between them.
+- `utils/googleMapsLoader.ts` memoises the single script load and pulls only
+  the `maps` and `marker` libraries via `importLibrary`. Note that
+  `ColorScheme` and `LatLngBounds` are **not** members of the `maps` library
+  object — they only exist on the `google.maps` namespace. That was verified
+  against the live API after it threw; `types/google.maps.d.ts` records the
+  distinction so it cannot regress.
+- Google renders its own dark theme via `colorScheme: DARK`, so the CSS
+  `invert()` filter that darkens OpenStreetMap tiles applies to Leaflet only.
+  It must never be applied to Google — the Maps ToS forbid obscuring the logo
+  and attribution, which is exactly what an inverted tile layer does.
+
 ## Notes
 
 - No backend: hunts, progress, and relics live entirely in the browser.
   Clearing site data resets your game.
-- Leaflet is loaded with a dynamic `import()` inside `GameMap` / `CharacterPinMap`
-  because it touches `window` at module load; importing it eagerly would break
-  server rendering.
-- Map tiles come from `tile.openstreetmap.org` (keyless, z0-19) and are darkened
-  with a CSS filter in `globals.css` to match the app's navy theme. Two earlier
-  providers were dropped: CARTO's `dark_all` now watermarks unauthenticated
-  requests with "API KEY REQUIRED", and Esri's World Dark Gray Canvas only
-  publishes down to z16, so the z17-18 map returned "Map data not yet
-  available". **If you switch providers, check the actual tile bytes** — both
-  failures return HTTP 200, so a green network panel hides them.
+- Neither map library is imported at module scope: Leaflet is pulled with a
+  dynamic `import()` inside an effect (it touches `window` at load), and the
+  Google script is injected on demand by `utils/googleMapsLoader.ts`. Importing
+  either eagerly would break server rendering.
+- Leaflet fallback tiles come from `tile.openstreetmap.org` (keyless, z0-19)
+  and are darkened with a CSS filter in `globals.css` to match the app's navy
+  theme. Two earlier providers were dropped: CARTO's `dark_all` now watermarks
+  unauthenticated requests with "API KEY REQUIRED", and Esri's World Dark Gray
+  Canvas only publishes down to z16, so the z17-18 map returned "Map data not
+  yet available". **If you switch providers, check the actual tile bytes** —
+  both failures return HTTP 200, so a green network panel hides them.
 - `navigator.vibrate` is ignored by browsers until the page has been activated
   by a real gesture, so `utils/sound.ts` gates haptics behind
   `navigator.userActivation` (falling back to a first-interaction listener).
