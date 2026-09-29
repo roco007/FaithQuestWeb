@@ -20,10 +20,15 @@ import type {
  * detected, while the parser also accepts a bare `HuntGame` (the exact shape
  * the share-code payload uses) so hand-written files work too.
  *
- * Only manifest IDs travel (`characterAssetId`, `sponsorBannerId`) — never
- * asset URLs — matching the hunt format itself, so an imported hunt cannot
- * inject remote resources and simply falls back to the procedural character
- * when a manifest entry is missing on the importing device.
+ * A location travels complete: its place, hint, character, questions and key are
+ * all its own. The only game-level additions are the end-of-hunt announcement
+ * and the character shown with it (`endCharacterAssetId`).
+ *
+ * Only manifest IDs travel (`characterAssetId`, `sponsorBannerId`,
+ * `endCharacterAssetId`) — never asset URLs — matching the hunt format itself,
+ * so an imported hunt cannot inject remote resources and simply falls back to
+ * the procedural character when a manifest entry is missing on the importing
+ * device.
  */
 
 /** Marker written into every exported file. */
@@ -189,7 +194,7 @@ function normaliseImportedQuestions(raw: unknown): HuntQuestion[] | undefined {
  * sensibly guess.
  */
 function normaliseImportedCharacter(raw: unknown, index: number): HuntCharacter {
-  const position = `Character ${index + 1}`;
+  const position = `Location ${index + 1}`;
   if (!isRecord(raw)) {
     throw new Error(`${position} in this file isn't a valid entry.`);
   }
@@ -230,6 +235,14 @@ function normaliseImportedCharacter(raw: unknown, index: number): HuntCharacter 
     hint: text(raw.hint),
     dialogue: text(raw.dialogue),
     key: text(raw.key).trim() || undefined,
+    // Strict boolean: a hand-written file only marks the treasure when the value
+    // is literally true. The legacy `isCongratulations` name is still accepted
+    // (files written before the model was re-framed around locations) but only
+    // `isTreasure` is ever written back. Duplicate flags survive import but are
+    // reduced to the first one when the hunt is next published (`normaliseGame`).
+    ...(raw.isTreasure === true || raw.isCongratulations === true
+      ? { isTreasure: true }
+      : {}),
     // Present only when at least one usable question survived validation —
     // `undefined` would serialise away anyway, but keeping the key absent
     // keeps hand-inspected files clean too.
@@ -270,7 +283,7 @@ export function parseHuntGameJson(input: string): ImportedHunt {
     throw new Error(`This file doesn't contain a hunt.`);
   }
   if (!Array.isArray(payload.characters)) {
-    throw new Error('This file has no character route.');
+    throw new Error('This file has no locations.');
   }
   const title = text(payload.title).trim();
   if (!title) {

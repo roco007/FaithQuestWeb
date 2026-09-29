@@ -23,6 +23,12 @@ npm run build
 npm start
 ```
 
+Checks (route engine + character manifest):
+
+```bash
+npm test
+```
+
 ## What's here
 
 | Route        | Purpose                                                          |
@@ -59,7 +65,7 @@ hold the reticle on the character for 900 ms to *sight* it; the sighted
 character then stays in view while the key from the previous stop is presented
 in the form docked at the bottom of the frame (a wrong key is rejected and the
 hunt does not advance); the right key makes the character answer in text +
-voice — its message, the key it hands over and the next target's hint appear
+voice — its message, the key it hands over and the next location's hint appear
 over its head and are read aloud (`utils/speech.ts`, replayable) until the
 player continues. That bubble hangs strictly *above* the character, tail
 pointing at it: the framing reserves its measured height (the model is kept
@@ -123,25 +129,80 @@ hunt key behave identically in the join box:
 Anything else is rejected with the "Game not found" error rather than resolved to
 a different hunt.
 
+## Teams never walk the same route
+
+A team that finishes early used to be the easiest way to solve a hunt: follow
+them. That is closed off — every team is dealt their **own stop order** when
+their round starts, in `utils/huntRoute.ts`:
+
+- `buildRoute` — called once by `joinGame` and stored on `HuntProgress.route`.
+  It deals the hunt's **walkable locations** (everything except the treasure)
+  with an unbiased Fisher–Yates draw. The treasure location is never shuffled:
+  it is where every team's hunt ends.
+- `resolveRoute` — the only place a route becomes stops, and **nothing is
+  rewritten**: each stop is the location the creator authored, with its own
+  coordinates, radius, hint, character, questions and key, in this team's dealt
+  order with the treasure last:
+
+  | stop | place | character + questions | opened by |
+  | --- | --- | --- | --- |
+  | dealt stop 1 | stop 1's own pin | stop 1's own | stop 1's key (given at the opening) |
+  | dealt stop 2 | stop 2's own pin | stop 2's own | stop 2's key (given at stop 1's reveal) |
+  | … | … | … | … |
+  | the treasure | the treasure's own pin | the treasure's own | its key (given at the stop before) |
+
+So **everything a stop needs belongs to the location** — H (the clue that leads
+there), C (the character that appears there and plays its video), Q (the
+questions asked there) and K (the key that unlocks them). What the dealt order
+changes is only *when* a team gets each package: the hunt opens with their first
+location's H + C + K, and the reveal that ends a stop hands over the next
+location's H + C + K.
+
+Discovery, the radar, the AR camera, the key ribbon and the clue line all read
+`activeRoute` from `HuntContext` — never `activeGame.characters`, which stays in
+the creator's authored order. Progress saved before routes existed carries no
+`route` and plays the authored order; a round in progress is never reshuffled. A
+location the creator adds after a team joined still gets walked, ahead of the
+treasure.
+
+The creator marks the treasure with **"This is the treasure location"** in the
+location editor — it is mandatory, and publishing a hunt without one is refused
+with the reason shown on `/creator`. A hunt has at most one: publishing keeps
+the first flagged location and clears the others. The treasure is walked to like
+any other stop (its own place, character, questions and key); clearing it is
+what shows the congratulations screen.
+
+## The end of the hunt
+
+The congratulations screen is the **End-of-Hunt Announcement** plus the
+character chosen beside it (**End-of-Hunt Character**), both authored in Game
+Details on `/creator` and both required — publishing without them is refused.
+The character is any camera roster entry, so a celebration clip such as
+`found-hidden-treasure` plays alongside the announcement when a team clears the
+treasure location. Hunts shared before the end character existed fall back to
+the treasure location's own character, so a round can always finish.
+
 ## Clues and keys stay on screen
 
 Two things the player must never have to remember or hunt for:
 
-- **The first clue.** Character 1 has no earlier character to hand a clue over,
-  so the creator's briefing *is* its clue — and it is readable the moment the
-  hunt opens, on the `/games` active-hunt card and in `HuntPlay`, rather than
-  waiting for the discovery radius. Later stops keep the native strict-visibility
-  rule: outside the radius the character's name and hint stay hidden and the
-  player navigates from the previous character's dialogue.
-- **The key in hand.** Character N's key is handed over by character N-1 (the
-  creator gives players the first one) and has to be presented at the next stop.
-  It used to exist only inside the reveal bubble, which disappears as soon as the
-  player walks on. `components/KeyInHand.tsx` pins it to the screen instead: the
-  ribbon under the hunt progress bar (labelled *Key from the creator* for the
-  first stop, *Latest key received* afterwards), the active-hunt card on
-  `/games`, and a chip on the AR frame in every phase (hunting, key entry,
-  reveal) — so it is still readable while typing it into the form. Tapping the
-  ribbon or the chip copies the key, so it can be pasted into the field.
+- **The clue ahead.** The team is always holding the clue for the stop they are
+  walking to: it arrives with the hunt's opening hand-over (first stop) or with
+  the reveal at the stop before it, so it is readable the moment it is given —
+  on the `/games` active-hunt card and in `HuntPlay` — rather than waiting for a
+  discovery radius. Distance and bearing stay behind the explicit location check
+  until the player is inside the discovery zone, and locations beyond the team's
+  next stay anonymous in the route list, so strict visibility on *proximity* is
+  unchanged.
+- **The key in hand.** A location's key opens that location, and it arrives one
+  stop early — so what is on screen is always the key for the walk ahead.
+  `components/KeyInHand.tsx` pins it to the screen: the ribbon under the hunt
+  progress bar (labelled *Your first key — opens your first location* while
+  nothing has been discovered, *Latest key received* afterwards), the
+  active-hunt card on `/games`, and a chip on the AR frame in every phase
+  (hunting, key entry, reveal) — so it is still readable while typing it into
+  the form. Tapping the ribbon or the chip copies the key, so it can be pasted
+  into the field.
 
 ## Geolocation requires HTTPS
 

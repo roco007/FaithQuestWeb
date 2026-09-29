@@ -11,6 +11,7 @@ import {
   Megaphone,
   ListChecks,
   CheckCircle2,
+  Gift,
   Plus,
   X,
 } from 'lucide-react';
@@ -60,7 +61,11 @@ function createLocalId(): string {
   return `char_${Date.now().toString(36)}_${nextLocalId}`;
 }
 
-/** Character editor, ported from `CharacterEditorModal.tsx`. */
+/**
+ * Location editor: where a location is, the hint that leads to it, the
+ * character that appears there, the questions asked there and the key that
+ * unlocks them — the four params a hunt location is authored with (H, C, Q, K).
+ */
 export function CharacterEditorModal({
   open,
   initial,
@@ -99,6 +104,13 @@ export function CharacterEditorModal({
   const [characterKey, setCharacterKey] = useState(initial?.key ?? generateCharacterKey());
   /** Reveal questions asked after the key is accepted (see `HuntQuestion`). */
   const [questions, setQuestions] = useState<HuntQuestion[]>(initial?.questions ?? []);
+  /**
+   * The hunt's treasure location — where every team's route ends. Exactly one
+   * location needs it; publishing refuses a hunt without one.
+   */
+  const [isTreasure, setIsTreasure] = useState(
+    (initial?.isTreasure ?? initial?.isCongratulations) === true
+  );
   // Name of the place chosen via search, shown back so the creator can see what
   // they picked; cleared as soon as they adjust the pin by hand.
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
@@ -204,6 +216,7 @@ export function CharacterEditorModal({
     setCharacterKey(initial?.key ?? generateCharacterKey());
     setQuestions(initial?.questions ?? []);
     setSponsorBannerId(initial?.sponsorBannerId ?? null);
+    setIsTreasure((initial?.isTreasure ?? initial?.isCongratulations) === true);
     setError(null);
   } else if (!open && wasOpen) {
     setWasOpen(false);
@@ -245,6 +258,10 @@ export function CharacterEditorModal({
     }
     if (!dialogue.trim()) {
       setError('Write what the character says when found.');
+      return;
+    }
+    if (!hint.trim()) {
+      setError('Write the hint that leads players to this location.');
       return;
     }
     const latNum = Number(latText.trim());
@@ -305,6 +322,8 @@ export function CharacterEditorModal({
       // Omitted entirely when empty, so key-only characters keep the exact
       // pre-questions shape in storage and exports.
       ...(finalQuestions.length > 0 ? { questions: finalQuestions } : {}),
+      // Omitted when unchecked, so un-flagging clears the field entirely.
+      ...(isTreasure ? { isTreasure: true } : {}),
     });
   };
 
@@ -312,165 +331,10 @@ export function CharacterEditorModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={initial ? 'Edit Character' : 'Add Character'}
+      title={initial ? 'Edit Location' : 'Add Location'}
       icon={<Sparkles size={18} />}
       accentColor="var(--amber)"
     >
-      <div className="field">
-        <label className="fieldLabel" htmlFor="char-name">
-          Character Name *
-        </label>
-        <input
-          id="char-name"
-          className="input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="The Bronze Sentinel"
-        />
-      </div>
-
-      <div className="field">
-        <label className="fieldLabel" htmlFor="char-subtitle">
-          Subtitle
-        </label>
-        <input
-          id="char-subtitle"
-          className="input"
-          value={subtitle}
-          onChange={(e) => setSubtitle(e.target.value)}
-          placeholder="Keeper of the eastern gate"
-        />
-      </div>
-
-      <div className="field">
-        <label className="fieldLabel" htmlFor="char-camera">
-          <Box size={12} /> Camera Character
-        </label>
-        <select
-          id="char-camera"
-          className="input"
-          value={characterAssetId !== null ? `asset:${characterAssetId}` : `type:${characterType}`}
-          onChange={e => {
-            const picked = e.target.value;
-            if (picked.startsWith('asset:')) {
-              const assetId = picked.slice('asset:'.length);
-              setCharacterAssetId(assetId);
-              // The pin's glyph and accent follow the chosen asset's fallback style.
-              const asset = characterAssets.find(candidate => candidate.id === assetId);
-              if (asset) setCharacterType(asset.fallbackType);
-              return;
-            }
-            const builtin = CHARACTER_TYPES.find(option => `type:${option.value}` === picked);
-            if (!builtin) return;
-            setCharacterAssetId(null);
-            setCharacterType(builtin.value);
-          }}
-        >
-          <optgroup label="Built-in characters">
-            {CHARACTER_TYPES.map(characterTypeOption => (
-              <option key={characterTypeOption.value} value={`type:${characterTypeOption.value}`}>
-                {characterTypeOption.glyph} {characterTypeOption.label}
-              </option>
-            ))}
-          </optgroup>
-          {characterAssets.length > 0 && (
-            <optgroup label="Camera roster">
-              {characterAssets.map(asset => (
-                <option key={asset.id} value={`asset:${asset.id}`}>
-                  {asset.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {/* Keep a saved roster entry selectable while the manifest loads or fails. */}
-          {characterAssetId !== null &&
-            !characterAssets.some(asset => asset.id === characterAssetId) && (
-              <option value={`asset:${characterAssetId}`}>
-                Saved camera character ({characterAssetId})
-              </option>
-            )}
-        </select>
-        {rosterState === 'loading' && <p className="fieldHelp">Loading camera characters…</p>}
-        {rosterState === 'error' && (
-          <div className="rosterNotice" role="status">
-            The camera roster could not load. Built-in characters are still available.
-          </div>
-        )}
-        {rosterState === 'ready' && characterAssets.length === 0 && (
-          <p className="fieldHelp">No custom camera characters are installed yet.</p>
-        )}
-        {selectedCharacterAsset && (
-          <p className="fieldHelp">
-            {selectedCharacterAsset.kind === 'model'
-              ? '3D model'
-              : selectedCharacterAsset.kind === 'video'
-                ? 'Cutout video'
-                : 'Photo cutout'}
-            {' · '}
-            {selectedCharacterAsset.realHeightM}m
-            {selectedCharacterAsset.description ? ` — ${selectedCharacterAsset.description}` : ''}
-          </p>
-        )}
-        <p className="fieldHelp">
-          The selected roster character appears through the player&apos;s camera at the map pin.
-          Its built-in style is used for the map glyph and as a fallback.
-        </p>
-      </div>
-
-      <div className="field">
-        <label className="fieldLabel" htmlFor="char-sponsor">
-          <Megaphone size={12} /> Sponsor Banner (optional)
-        </label>
-        <select
-          id="char-sponsor"
-          className="input"
-          value={sponsorBannerId ?? ''}
-          onChange={e => setSponsorBannerId(e.target.value || null)}
-        >
-          <option value="">No banner — hint above the head</option>
-          {sponsorBanners.map(banner => (
-            <option key={banner.id} value={banner.id}>
-              {banner.name}
-            </option>
-          ))}
-          {/* Keep a saved banner selectable while the manifest loads or fails. */}
-          {sponsorBannerId !== null &&
-            !sponsorBanners.some(banner => banner.id === sponsorBannerId) && (
-              <option value={sponsorBannerId}>Saved banner ({sponsorBannerId})</option>
-            )}
-        </select>
-        {sponsorState === 'loading' && <p className="fieldHelp">Loading sponsor banners…</p>}
-        {sponsorState === 'error' && (
-          <div className="rosterNotice" role="status">
-            The sponsor banner roster could not load — this character keeps the default hint
-            layout.
-          </div>
-        )}
-        {sponsorState === 'ready' && sponsorBanners.length === 0 && (
-          <p className="fieldHelp">No sponsor banners are installed yet.</p>
-        )}
-        {sponsorState === 'ready' &&
-          sponsorBannerId !== null &&
-          !sponsorBanners.some(banner => banner.id === sponsorBannerId) && (
-            <div className="rosterNotice" role="status">
-              The saved banner “{sponsorBannerId}” is no longer installed — the default hint
-              layout will be used.
-            </div>
-          )}
-        {selectedSponsorBanner && (
-          <img
-            className="sponsorBannerPreview"
-            src={encodePublicPath(selectedSponsorBanner.src)}
-            alt={selectedSponsorBanner.alt}
-          />
-        )}
-        <p className="fieldHelp">
-          A selected banner shows in a card above the character in the AR view — on its own
-          before the key is entered, combined with the hint after it; with no banner the hint
-          stays above the character&apos;s head.
-        </p>
-      </div>
-
       <div className="field">
         <span className="fieldLabel">
           <MapPin size={12} /> Placement — search a place, click the map, drag the pin, or
@@ -568,34 +432,205 @@ export function CharacterEditorModal({
       </div>
 
       <div className="field">
-        <label className="fieldLabel" htmlFor="char-key">
-          <KeyRound size={12} /> Discovery Key
+        <label className="fieldLabel" htmlFor="char-hint">
+          Hint That Leads Here *
         </label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            id="char-key"
-            className="input mono"
-            style={{ flex: 1, letterSpacing: 2 }}
-            value={characterKey}
-            onChange={(e) => setCharacterKey(e.target.value)}
-            placeholder="K7M2QX"
-            autoComplete="off"
-            spellCheck={false}
-            aria-label="Discovery key"
-          />
-          <button
-            type="button"
-            className="btnGhost"
-            onClick={() => setCharacterKey(generateCharacterKey())}
-            aria-label="Generate a new key"
-          >
-            <RefreshCw size={14} />
-            New
-          </button>
-        </div>
+        <textarea
+          id="char-hint"
+          className="textarea"
+          value={hint}
+          onChange={(e) => setHint(e.target.value)}
+          placeholder="Look for the tall bronze figure guarding the old entrance."
+        />
         <p className="fieldHelp">
-          Players must present this key to discover the character. Hand the first character's key
-          to players yourself to start the hunt — each character gives the next key when found.
+          The clue players follow to reach this location: they are handed it one stop early —
+          when the hunt opens if it is their first, otherwise by the reveal at the stop before —
+          so it is the clue on screen while they walk. Write it about the place, not the
+          character.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="fieldLabel" htmlFor="char-camera">
+          <Box size={12} /> Character That Appears Here
+        </label>
+        <select
+          id="char-camera"
+          className="input"
+          value={characterAssetId !== null ? `asset:${characterAssetId}` : `type:${characterType}`}
+          onChange={e => {
+            const picked = e.target.value;
+            if (picked.startsWith('asset:')) {
+              const assetId = picked.slice('asset:'.length);
+              setCharacterAssetId(assetId);
+              // The pin's glyph and accent follow the chosen asset's fallback style.
+              const asset = characterAssets.find(candidate => candidate.id === assetId);
+              if (asset) setCharacterType(asset.fallbackType);
+              return;
+            }
+            const builtin = CHARACTER_TYPES.find(option => `type:${option.value}` === picked);
+            if (!builtin) return;
+            setCharacterAssetId(null);
+            setCharacterType(builtin.value);
+          }}
+        >
+          <optgroup label="Built-in characters">
+            {CHARACTER_TYPES.map(characterTypeOption => (
+              <option key={characterTypeOption.value} value={`type:${characterTypeOption.value}`}>
+                {characterTypeOption.glyph} {characterTypeOption.label}
+              </option>
+            ))}
+          </optgroup>
+          {characterAssets.length > 0 && (
+            <optgroup label="Camera roster">
+              {characterAssets.map(asset => (
+                <option key={asset.id} value={`asset:${asset.id}`}>
+                  {asset.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {/* Keep a saved roster entry selectable while the manifest loads or fails. */}
+          {characterAssetId !== null &&
+            !characterAssets.some(asset => asset.id === characterAssetId) && (
+              <option value={`asset:${characterAssetId}`}>
+                Saved camera character ({characterAssetId})
+              </option>
+            )}
+        </select>
+        {rosterState === 'loading' && <p className="fieldHelp">Loading camera characters…</p>}
+        {rosterState === 'error' && (
+          <div className="rosterNotice" role="status">
+            The camera roster could not load. Built-in characters are still available.
+          </div>
+        )}
+        {rosterState === 'ready' && characterAssets.length === 0 && (
+          <p className="fieldHelp">No custom camera characters are installed yet.</p>
+        )}
+        {selectedCharacterAsset && (
+          <p className="fieldHelp">
+            {selectedCharacterAsset.kind === 'model'
+              ? '3D model'
+              : selectedCharacterAsset.kind === 'video'
+                ? 'Cutout video'
+                : 'Photo cutout'}
+            {' · '}
+            {selectedCharacterAsset.realHeightM}m
+            {selectedCharacterAsset.description ? ` — ${selectedCharacterAsset.description}` : ''}
+          </p>
+        )}
+        <p className="fieldHelp">
+          The character that appears at this location and plays its video: it is pinned here,
+          seen through the player&apos;s camera on arrival, and speaks once the key is accepted
+          and the questions below are answered. Its built-in style is used for the map glyph and
+          as a fallback.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="fieldLabel" htmlFor="char-name">
+          Character Name *
+        </label>
+        <input
+          id="char-name"
+          className="input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="The Bronze Sentinel"
+        />
+        <p className="fieldHelp">
+          Who stands at this location — the person, creature or figure this
+          character represents or guards. It is the name on the route card and the
+          radar once the team holds this stop&apos;s clue, the label on the AR
+          banner when they arrive, and who the reveal speaks as.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="fieldLabel" htmlFor="char-subtitle">
+          Subtitle
+        </label>
+        <input
+          id="char-subtitle"
+          className="input"
+          value={subtitle}
+          onChange={(e) => setSubtitle(e.target.value)}
+          placeholder="Keeper of the eastern gate"
+        />
+        <p className="fieldHelp">
+          One short line under the name — what the character is, or what it guards
+          here. Shown wherever the name is shown.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="fieldLabel" htmlFor="char-dialogue">
+          Dialogue on Discovery *
+        </label>
+        <textarea
+          id="char-dialogue"
+          className="textarea"
+          value={dialogue}
+          onChange={(e) => setDialogue(e.target.value)}
+          placeholder="I have guarded this gate for four centuries. The next sentinel waits by the fountain."
+        />
+        <p className="fieldHelp">
+          What this location&apos;s character says when it is found here — spoken aloud with its
+          video on the reveal.
+        </p>
+      </div>
+
+      <div className="field">
+        <label className="fieldLabel" htmlFor="char-sponsor">
+          <Megaphone size={12} /> Sponsor Banner (optional)
+        </label>
+        <select
+          id="char-sponsor"
+          className="input"
+          value={sponsorBannerId ?? ''}
+          onChange={e => setSponsorBannerId(e.target.value || null)}
+        >
+          <option value="">No banner — hint above the head</option>
+          {sponsorBanners.map(banner => (
+            <option key={banner.id} value={banner.id}>
+              {banner.name}
+            </option>
+          ))}
+          {/* Keep a saved banner selectable while the manifest loads or fails. */}
+          {sponsorBannerId !== null &&
+            !sponsorBanners.some(banner => banner.id === sponsorBannerId) && (
+              <option value={sponsorBannerId}>Saved banner ({sponsorBannerId})</option>
+            )}
+        </select>
+        {sponsorState === 'loading' && <p className="fieldHelp">Loading sponsor banners…</p>}
+        {sponsorState === 'error' && (
+          <div className="rosterNotice" role="status">
+            The sponsor banner roster could not load — this character keeps the default hint
+            layout.
+          </div>
+        )}
+        {sponsorState === 'ready' && sponsorBanners.length === 0 && (
+          <p className="fieldHelp">No sponsor banners are installed yet.</p>
+        )}
+        {sponsorState === 'ready' &&
+          sponsorBannerId !== null &&
+          !sponsorBanners.some(banner => banner.id === sponsorBannerId) && (
+            <div className="rosterNotice" role="status">
+              The saved banner “{sponsorBannerId}” is no longer installed — the default hint
+              layout will be used.
+            </div>
+          )}
+        {selectedSponsorBanner && (
+          <img
+            className="sponsorBannerPreview"
+            src={encodePublicPath(selectedSponsorBanner.src)}
+            alt={selectedSponsorBanner.alt}
+          />
+        )}
+        <p className="fieldHelp">
+          A selected banner shows in a card above the character in the AR view — on its own
+          before the key is entered, combined with the hint after it; with no banner the hint
+          stays above the character&apos;s head.
         </p>
       </div>
 
@@ -604,12 +639,13 @@ export function CharacterEditorModal({
           key alone opens the character (the original behaviour). */}
       <div className="field">
         <span className="fieldLabel">
-          <ListChecks size={12} /> Reveal Questions (optional)
+          <ListChecks size={12} /> Questions Asked Here (optional)
         </span>
         <p className="fieldHelp">
-          Asked after the player presents the key and before this character's message and video
-          are revealed — every question must be answered correctly to unlock it. Leave this empty
-          to let the key alone open the character.
+          Asked once the player presents this location's key and before its character speaks and
+          plays its video — every question must be answered correctly to clear the location (and,
+          on the treasure, to end the hunt). Leave this empty to let the key alone open the
+          character.
         </p>
 
         {questions.map((question, qIndex) => (
@@ -769,29 +805,59 @@ export function CharacterEditorModal({
       </div>
 
       <div className="field">
-        <label className="fieldLabel" htmlFor="char-hint">
-          Clue Hint
+        <label className="fieldLabel" htmlFor="char-key">
+          <KeyRound size={12} /> Key That Unlocks This Location
         </label>
-        <textarea
-          id="char-hint"
-          className="textarea"
-          value={hint}
-          onChange={(e) => setHint(e.target.value)}
-          placeholder="Look for the tall bronze figure guarding the old entrance."
-        />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            id="char-key"
+            className="input mono"
+            style={{ flex: 1, letterSpacing: 2 }}
+            value={characterKey}
+            onChange={(e) => setCharacterKey(e.target.value)}
+            placeholder="K7M2QX"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Discovery key"
+          />
+          <button
+            type="button"
+            className="btnGhost"
+            onClick={() => setCharacterKey(generateCharacterKey())}
+            aria-label="Generate a new key"
+          >
+            <RefreshCw size={14} />
+            New
+          </button>
+        </div>
+        <p className="fieldHelp">
+          Handed to each team one stop early: when the hunt opens if this is their first
+          location, otherwise by the reveal that ends the stop before it. Present it on arrival
+          to open this location&apos;s questions.
+        </p>
       </div>
 
       <div className="field">
-        <label className="fieldLabel" htmlFor="char-dialogue">
-          Dialogue on Discovery *
+        <label
+          className="fieldLabel"
+          htmlFor="char-treasure"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+        >
+          <input
+            id="char-treasure"
+            type="checkbox"
+            checked={isTreasure}
+            onChange={(e) => setIsTreasure(e.target.checked)}
+            style={{ width: 16, height: 16, accentColor: 'var(--amber)' }}
+          />
+          <Gift size={12} /> This is the treasure location
         </label>
-        <textarea
-          id="char-dialogue"
-          className="textarea"
-          value={dialogue}
-          onChange={(e) => setDialogue(e.target.value)}
-          placeholder="I have guarded this gate for four centuries. The next sentinel waits by the fountain."
-        />
+        <p className="fieldHelp">
+          The place the hunt ends: it is never shuffled into a team&apos;s route — every route
+          finishes here. Clearing this location&apos;s questions is what shows the congratulations
+          screen, with the End-of-Hunt Announcement and the character chosen beside it. A hunt
+          needs exactly one treasure location, and publishing is refused without it.
+        </p>
       </div>
 
       {error && <div className="banner bannerWarn">{error}</div>}
@@ -801,7 +867,7 @@ export function CharacterEditorModal({
           Cancel
         </button>
         <button type="button" className="btnAmber" onClick={handleSave}>
-          {initial ? 'Save Changes' : 'Add to Hunt'}
+          {initial ? 'Save Changes' : 'Add Location'}
         </button>
       </div>
     </Modal>

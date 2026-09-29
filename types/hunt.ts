@@ -1,7 +1,8 @@
 /**
  * Types for the location-based AR treasure hunt feature.
- * Roles: a game-creator authors a hunt (characters pinned to geolocations),
- * a game-player joins via game ID and discovers characters through the camera.
+ * Roles: a game-creator authors a hunt (a list of locations, each with a hint,
+ * a character, questions and a key), a game-player joins via game ID and
+ * discovers the characters through the camera.
  */
 
 /** Procedural 3D character archetypes rendered in the AR view. */
@@ -44,10 +45,15 @@ export interface HuntQuestion {
 
 export interface HuntCharacter {
   id: string;
-  /** 1-based sequence in the treasure hunt route. */
+  /** 1-based position in the creator's list of locations. */
   order: number;
+  /** Name of the character that appears here — what the reveal is titled with. */
   name: string;
   subtitle: string;
+  /**
+   * Where this location is: the place the team walks to, and the pin the
+   * character appears on when they get there.
+   */
   latitude: number;
   longitude: number;
   /**
@@ -74,24 +80,48 @@ export interface HuntCharacter {
    * above the character's head.
    */
   sponsorBannerId?: string | null;
-  /** Clue the player receives to locate THIS character. */
+  /**
+   * **H** — the clue that leads players to this location. A team is handed it
+   * one stop early: by the reveal that ends the stop before this one in their
+   * route, or when the round opens when this location is their first. It is
+   * therefore the clue on screen while they walk here, which is why it must
+   * describe the place and not the character waiting on it.
+   */
   hint: string;
-  /** What the character says when found — contains the clue to the next target. */
+  /** What the character says when found — played with its video on arrival. */
   dialogue: string;
   /**
-   * Discovery key the player must present to THIS character to be discovered.
-   * Character N's key is handed out by character N-1 when it is found; the
-   * first character's key is given to players by the creator. Auto-generated
-   * when absent (games saved before keys existed).
+   * **K** — the key that unlocks this location's questions. Authored here and
+   * handed to the team one stop early (see `hint`), so it is in their hand while
+   * they walk here and is presented on arrival to open `questions`. The round's
+   * opening hand-over gives every team the key to their first location; the
+   * treasure location's key is the last one handed out. Auto-generated when
+   * absent (games saved before keys existed).
    */
   key?: string;
   /**
-   * Questions asked once the key is accepted and before the reveal — the
-   * character's dialogue, next key and video stay locked until every question
-   * is answered correctly. Empty/absent = the key alone unlocks the character
-   * (games predating this feature, or characters with no gate).
+   * **Q** — the questions asked here, once the key is accepted: this location's
+   * character, dialogue, video and the hand-over that follows all stay locked
+   * until every question is answered correctly. Empty/absent = the key alone
+   * unlocks the location (games predating this feature, or locations with no
+   * gate).
    */
   questions?: HuntQuestion[];
+  /**
+   * Marks the **treasure location**: the place the hunt ends. It is never
+   * shuffled into a team's route — it is dealt last, so every team finishes at
+   * the treasure whatever order they walked. Clearing its questions is what
+   * shows the congratulations: the end-of-hunt announcement plus the character
+   * chosen for it (`HuntGame.endCharacterAssetId`). A hunt needs exactly one;
+   * publishing is refused without one.
+   */
+  isTreasure?: boolean;
+  /**
+   * Legacy name of `isTreasure`, still read so hunts saved (or shared) before
+   * the model was re-framed around locations keep playing. Never written.
+   * @deprecated use `isTreasure`
+   */
+  isCongratulations?: boolean;
 }
 
 export interface HuntGame {
@@ -102,9 +132,17 @@ export interface HuntGame {
   creatorName: string;
   createdAt: string;
   updatedAt: string;
-  /** Announcement spoken/shown when the final character is discovered. */
+  /** Announcement spoken/shown when the treasure location is cleared. */
   endAnnouncement: string;
-  /** Characters sorted by `order` ascending. */
+  /**
+   * Optional ID from `public/characters/manifest.json`: the character that
+   * appears with the end-of-hunt announcement on the congratulations screen.
+   * Chosen by the creator next to the announcement (publishing asks for one);
+   * hunts shared before it existed fall back to the treasure location's own
+   * character.
+   */
+  endCharacterAssetId?: string | null;
+  /** The hunt's locations sorted by `order` ascending — the treasure last. */
   characters: HuntCharacter[];
 }
 
@@ -115,6 +153,16 @@ export interface HuntProgress {
   gameId: string;
   joinedAt: string;
   discoveredCharacterIds: string[];
+  /**
+   * This team's stop order, dealt once when the round starts (on join): the
+   * hunt's **walkable** location IDs shuffled at random. The treasure location
+   * is never dealt — it is appended last, so every team's hunt finishes at the
+   * treasure whatever path their shuffle took. Discovery always follows this
+   * order, so no two teams walk the same path. Absent on progress saved before
+   * routes existed — those fall back to the authored order and are never
+   * reshuffled mid-hunt (see `resolveRoute`).
+   */
+  route?: string[];
   status: HuntStatus;
   completedAt?: string | null;
 }
@@ -128,5 +176,7 @@ export interface HuntGameDraft {
   description: string;
   creatorName: string;
   endAnnouncement: string;
+  /** Character shown with the announcement — required when publishing. */
+  endCharacterAssetId?: string | null;
   characters: HuntCharacter[];
 }

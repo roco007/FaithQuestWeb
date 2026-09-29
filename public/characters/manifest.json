@@ -36,6 +36,18 @@
       "realHeightM": 1.7,
       "aspectRatio": 0.5625,
       "attribution": "Test clip"
+    },
+    {
+      "id": "found-hidden-treasure",
+      "name": "Found Hidden Treasure",
+      "description": "A digger unearths hidden treasure — the congratulations clip for the hunt finale.",
+      "kind": "video",
+      "src": "/characters/found-hidden-treasure-transparent.webm",
+      "fallbackType": "guardian",
+      "accent": "#f59e0b",
+      "realHeightM": 1.8,
+      "aspectRatio": 0.5634,
+      "attribution": "Supplied treasure clip"
     }
   ]
 }

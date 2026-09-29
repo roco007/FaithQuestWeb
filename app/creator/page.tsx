@@ -6,13 +6,15 @@ import { Plus, ChevronUp, ChevronDown, Trash2, Pencil, Rocket, Share2, Wand2, Co
 import { useHunt } from '../../context/HuntContext';
 import { useGame } from '../../context/GameContext';
 import type { HuntCharacter, HuntGame, HuntGameDraft } from '../../types/hunt';
+import type { CharacterAsset } from '../../services/characterAssets';
+import { loadCharacterAssets } from '../../services/characterAssets';
 import { CharacterEditorModal } from '../../components/CharacterEditorModal';
 import { Modal } from '../../components/Modal';
 import { buildGameJoinUrl, buildGameShareMessage, currentOrigin } from '../../services/shareGame';
 import { downloadHuntGame, parseHuntGameJson, type ImportedHunt } from '../../services/huntFile';
 import { triggerHaptic } from '../../utils/sound';
 
-/** Character-type emoji, for the route list. */
+/** Character-type emoji, for the location list. */
 const GLYPHS: Record<HuntCharacter['characterType'], string> = {
   guardian: '🛡',
   angel: '👼',
@@ -21,8 +23,9 @@ const GLYPHS: Record<HuntCharacter['characterType'], string> = {
   oracle: '🔮',
 };
 
-/** Game-creator editor: metadata + an ordered character route, each pinned to a
- *  geolocation. Publishing assigns the hunt number players join with.
+/** Game-creator editor: metadata + an ordered list of locations, each carrying
+ *  its own hint, character, questions and key. Publishing assigns the hunt
+ *  number players join with.
  *
  *  `useSearchParams` opts the page into client-side rendering, so Next requires a
  *  Suspense boundary around it to prerender the shell — see the wrapper below. */
@@ -44,6 +47,13 @@ function CreatorEditor() {
   const [endAnnouncement, setEndAnnouncement] = useState(
     'Congratulations, seeker! You have found the treasure. The hunt is complete!'
   );
+  /**
+   * The character shown with the end-of-hunt announcement: chosen next to it in
+   * Game Details, required before publishing (see `normaliseGame`).
+   */
+  const [endCharacterAssetId, setEndCharacterAssetId] = useState<string | null>(null);
+  /** Camera roster for the end-of-hunt character picker (deployment-owned). */
+  const [endCharacterAssets, setEndCharacterAssets] = useState<CharacterAsset[]>([]);
   const [characters, setCharacters] = useState<HuntCharacter[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -64,8 +74,27 @@ function CreatorEditor() {
     setDescription(existing.description);
     setCreatorName(existing.creatorName);
     setEndAnnouncement(existing.endAnnouncement);
+    setEndCharacterAssetId(existing.endCharacterAssetId ?? null);
     setCharacters([...existing.characters]);
   }, [existing]);
+
+  // The camera roster is deployment-owned; cached for the session. Needed by the
+  // end-of-hunt character picker in Game Details (the location editor loads its
+  // own copy when it opens).
+  useEffect(() => {
+    let active = true;
+    loadCharacterAssets()
+      .then(assets => {
+        if (active) setEndCharacterAssets(assets);
+      })
+      .catch(loadError => {
+        console.warn('Could not load camera character roster:', loadError);
+        if (active) setEndCharacterAssets([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   /** Renumbers `order` to be a dense 1-based sequence after any edit. */
   const renumber = (list: HuntCharacter[]) => list.map((ch, i) => ({ ...ch, order: i + 1 }));
@@ -103,9 +132,9 @@ function CreatorEditor() {
 
   /**
    * Loads a hunt exported as JSON (see services/huntFile) straight into the
-   * editor — details, route, discovery keys and sponsor choices all come from
-   * the file — so the creator can tweak or append characters and publish. The
-   * file's hunt number flows into the draft: publishing keeps it when free
+   * editor — details, locations, discovery keys and sponsor choices all come
+   * from the file — so the creator can tweak or append locations and publish.
+   * The file's hunt number flows into the draft: publishing keeps it when free
    * (so the same file works on any device) or replaces the local copy when a
    * game with that number already exists here.
    */
@@ -119,6 +148,7 @@ function CreatorEditor() {
       setDescription(imported.description);
       setCreatorName(imported.creatorName);
       setEndAnnouncement(imported.endAnnouncement);
+      setEndCharacterAssetId(imported.endCharacterAssetId ?? null);
       setCharacters(imported.characters);
       setImportedGame(imported);
       setError(null);
@@ -126,7 +156,7 @@ function CreatorEditor() {
       setNotice(
         replacesLocal
           ? `Loaded "${imported.title}" from ${file.name}. Hunt number ${imported.id} already exists on this device — publishing will replace that copy.`
-          : `Loaded "${imported.title}" from ${file.name} — ${imported.characters.length} character${imported.characters.length === 1 ? '' : 's'}. Review the route, make any edits, then publish.`
+          : `Loaded "${imported.title}" from ${file.name} — ${imported.characters.length} location${imported.characters.length === 1 ? '' : 's'}. Review the locations, make any edits, then publish.`
       );
       triggerHaptic('success');
     } catch (err) {
@@ -143,11 +173,21 @@ function CreatorEditor() {
       return;
     }
     if (characters.length === 0) {
-      setError('Place at least one character on the map.');
+      setError('Place at least one location on the map.');
+      return;
+    }
+    if (!characters.some((character) => character.isTreasure || character.isCongratulations)) {
+      setError(
+        'Mark the treasure location: edit the location your hunt ends at and tick "This is the treasure location".'
+      );
       return;
     }
     if (!endAnnouncement.trim()) {
       setError('Write the end-of-hunt announcement.');
+      return;
+    }
+    if (!endCharacterAssetId) {
+      setError('Choose the end-of-hunt character: the character shown with the announcement.');
       return;
     }
 
@@ -165,6 +205,7 @@ function CreatorEditor() {
         description,
         creatorName,
         endAnnouncement,
+        endCharacterAssetId,
         characters,
       };
       triggerHaptic('success');
@@ -229,7 +270,7 @@ function CreatorEditor() {
             <p className="pageSubtitle">
               {existing
                 ? `Editing ${existing.id}. Changes apply to future joins.`
-                : 'Author a hunt by placing characters along a real-world route. Players walk between them in order.'}
+                : 'Author a hunt by placing locations along a real-world route. Players walk them in the order their own route deals.'}
             </p>
           </div>
         </div>
@@ -311,11 +352,41 @@ function CreatorEditor() {
             />
           </div>
         </div>
+        {/* The congratulations screen is the announcement plus the character
+            shown with it, so the character is chosen right beside it. */}
+        <div className="field">
+          <label className="fieldLabel" htmlFor="game-end-character">
+            End-of-Hunt Character *
+          </label>
+          <select
+            id="game-end-character"
+            className="input"
+            value={endCharacterAssetId ?? ''}
+            onChange={(e) => setEndCharacterAssetId(e.target.value || null)}
+          >
+            <option value="">Choose the character shown at the end…</option>
+            {endCharacterAssets.map(asset => (
+              <option key={asset.id} value={asset.id}>
+                {asset.name}
+              </option>
+            ))}
+            {/* Keep a saved choice selectable while the manifest loads or fails. */}
+            {endCharacterAssetId && !endCharacterAssets.some(asset => asset.id === endCharacterAssetId) && (
+              <option value={endCharacterAssetId}>
+                Saved camera character ({endCharacterAssetId})
+              </option>
+            )}
+          </select>
+          <p className="fieldHelp">
+            Shown together with the announcement when a team clears the treasure location —
+            the hunt needs both a message and a character to celebrate with.
+          </p>
+        </div>
       </div>
 
       <div className="sectionHeader">
         <h2 className="sectionLabel" style={{ marginBottom: 0 }}>
-          Character Route ({characters.length})
+          Location Route ({characters.length})
         </h2>
         <button
           type="button"
@@ -326,15 +397,16 @@ function CreatorEditor() {
           }}
         >
           <Plus size={15} />
-          Add Character
+          Add Location
         </button>
       </div>
 
       {characters.length === 0 ? (
         <div className="card emptyState">
-          <div className="emptyTitle">No characters placed yet</div>
+          <div className="emptyTitle">No locations placed yet</div>
           <p style={{ fontSize: 13, marginBottom: 14 }}>
-            Add your first character, then click the map to pin where players should find them.
+            Add your first location — its hint, the character that appears there, its questions
+            and the key that opens them — then click the map to pin it.
           </p>
           <button
             type="button"
@@ -345,7 +417,7 @@ function CreatorEditor() {
             }}
           >
             <Plus size={15} />
-            Add Character
+            Add Location
           </button>
         </div>
       ) : (
@@ -360,29 +432,35 @@ function CreatorEditor() {
                 <div className="charName">
                   <span className="charNameText">{character.name}</span>
                   {character.key && (
-                    <span className="keyChip mono" title="Discovery key">
+                    <span
+                      className="keyChip mono"
+                      title="The key that unlocks this location's questions — handed to each team one stop early (at the start for their first location)"
+                    >
                       {character.key}
                     </span>
                   )}
                   {character.characterAssetId && (
                     <span className="pill" title="Custom camera roster character">
-                      Camera asset
+                      Character
                     </span>
                   )}
                   {(character.questions?.length ?? 0) > 0 && (
-                    <span className="pill" title="Questions asked before the reveal unlocks">
+                    <span className="pill" title="Questions asked at this location">
                       {character.questions!.length} question
                       {character.questions!.length === 1 ? '' : 's'}
                     </span>
                   )}
-                  {index === 0 && (
-                    <span className="pill" title="Give this key to players to start the hunt">
-                      First key
+                  {(character.isTreasure || character.isCongratulations) && (
+                    <span
+                      className="pill"
+                      title="Treasure location — never shuffled, so every team's route finishes here"
+                    >
+                      🎁 Treasure
                     </span>
                   )}
                 </div>
                 <div className="charMeta">
-                  {character.subtitle || 'No subtitle'} · {character.radiusMeters}m radius ·{' '}
+                  {character.hint || 'No hint yet'} · {character.radiusMeters}m radius ·{' '}
                   {character.latitude.toFixed(4)}, {character.longitude.toFixed(4)}
                 </div>
               </div>
@@ -408,7 +486,7 @@ function CreatorEditor() {
                 <button
                   type="button"
                   className="iconBtn"
-                  aria-label="Edit character"
+                  aria-label="Edit location"
                   onClick={() => {
                     setEditingIndex(index);
                     setEditorOpen(true);
@@ -419,7 +497,7 @@ function CreatorEditor() {
                 <button
                   type="button"
                   className="iconBtn iconBtnDanger"
-                  aria-label="Remove character"
+                  aria-label="Remove location"
                   onClick={() => handleDeleteCharacter(index)}
                 >
                   <Trash2 size={15} />
@@ -437,7 +515,7 @@ function CreatorEditor() {
         </button>
       </div>
 
-      {/* Character editor — reuses the player's position as the map centre. */}
+      {/* Location editor — reuses the player's position as the map centre. */}
       <CharacterEditorModal
         open={editorOpen}
         initial={editingIndex !== null ? characters[editingIndex] ?? null : null}

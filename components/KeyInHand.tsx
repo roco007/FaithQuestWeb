@@ -13,14 +13,17 @@ interface KeyInHandProps {
 }
 
 /**
- * The discovery key the player is holding right now, shown at all times.
+ * The key the team is holding right now, shown at all times.
  *
- * Character N's key is handed over by character N-1 (the creator gives players
- * the first one) and has to be presented at the next stop. It used to live only
- * inside the reveal bubble, which disappears the moment the player carries on
- * walking — so it stays on screen here while walking, while sighting a
- * character, and while typing it into the key form. Tapping copies it to the
- * clipboard, so it can be pasted straight into the form.
+ * Each location owns the key that opens it, and it arrives one stop early: the
+ * reveal at the stop before hands it over, or — before anything has been
+ * discovered — it was given when the hunt opened. So what is on screen here at
+ * any moment is the key for the stop the team is walking to next.
+ *
+ * It used to live only inside the reveal bubble, which disappears the moment
+ * the player carries on walking — so it stays on screen here while walking,
+ * while sighting a character, and while typing it into the key form. Tapping
+ * copies it to the clipboard, so it can be pasted straight into the form.
  */
 export function KeyInHand({ variant = 'bar', className }: KeyInHandProps) {
   const { currentCharacter, activeProgress } = useHunt();
@@ -46,10 +49,13 @@ export function KeyInHand({ variant = 'bar', className }: KeyInHandProps) {
     );
   }
 
-  const label =
-    activeProgress.discoveredCharacterIds.length === 0
-      ? 'Key from the creator'
-      : 'Latest key received';
+  // Nothing discovered yet: this is the key given when the hunt opened, and it
+  // opens the team's first location. Every key after it is the one the last
+  // reveal handed over — the one that opens the stop being walked to.
+  const isFirstKey = activeProgress.discoveredCharacterIds.length === 0;
+  const label = isFirstKey
+    ? 'Your first key — opens your first location'
+    : 'Latest key received';
 
   const handleCopy = async () => {
     try {
