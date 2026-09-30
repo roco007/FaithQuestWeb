@@ -95,7 +95,7 @@ interface ARSceneViewProps {
   /**
    * The deployment banner selected for this character. When set, the sponsor
    * card owns the slot above the character's head in every phase: the banner
-   * alone before the key is entered, the banner + hint dialogue after it.
+   * alone before the key is entered, the banner + clue after it.
    * When absent the hint keeps floating above the head as before.
    */
   sponsorBanner?: SponsorBanner | null;
@@ -548,7 +548,7 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
   }
 
   // Sponsor card: the banner pinned just above the model's head — the banner
-  // alone before the key is entered, the banner + hint/reveal dialogue once the
+  // alone before the key is entered, the banner + clue/hand-over once the
   // key is accepted. With no banner the head bubble above renders instead —
   // the layout players already know.
   let sponsorCard: React.ReactElement | null = null;

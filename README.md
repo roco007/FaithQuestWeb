@@ -64,10 +64,12 @@ discovery loop runs on that frame, in three phases: walk inside the radius and
 hold the reticle on the character for 900 ms to *sight* it; the sighted
 character then stays in view while the key from the previous stop is presented
 in the form docked at the bottom of the frame (a wrong key is rejected and the
-hunt does not advance); the right key makes the character answer in text +
-voice — its message, the key it hands over and the next location's hint appear
-over its head and are read aloud (`utils/speech.ts`, replayable) until the
-player continues. That bubble hangs strictly *above* the character, tail
+hunt does not advance); the right key lets it through,
+and the hand-over appears over its head — the next location's name, the key for it
+and its clue — read aloud (`utils/speech.ts`, replayable) until the player
+continues. There is no scripted speech: a character has no lines of its own, so
+the only thing said at a find is that hand-over (the end-of-hunt announcement on
+the last one). That bubble hangs strictly *above* the character, tail
 pointing at it: the framing reserves its measured height (the model is kept
 below it, never behind it), and the one case where it cannot fit — a very tall
 hand-off on a very short screen — docks the reveal into the HUD instead of

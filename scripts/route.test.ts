@@ -45,7 +45,6 @@ const make = (id: string, order: number, extra: Partial<HuntCharacter> = {}): Hu
   radiusMeters: 12,
   characterType: 'guardian',
   hint: `${id} clue`,
-  dialogue: `${id} dialogue`,
   key: `KEY${id}`,
   ...extra,
 });

@@ -78,7 +78,6 @@ export function CharacterEditorModal({
   const [name, setName] = useState(initial?.name ?? '');
   const [subtitle, setSubtitle] = useState(initial?.subtitle ?? '');
   const [hint, setHint] = useState(initial?.hint ?? '');
-  const [dialogue, setDialogue] = useState(initial?.dialogue ?? '');
   const [characterType, setCharacterType] = useState<HuntCharacterType>(
     initial?.characterType ?? 'guardian'
   );
@@ -203,7 +202,6 @@ export function CharacterEditorModal({
     setName(initial?.name ?? '');
     setSubtitle(initial?.subtitle ?? '');
     setHint(initial?.hint ?? '');
-    setDialogue(initial?.dialogue ?? '');
     setCharacterType(initial?.characterType ?? 'guardian');
     setCharacterAssetId(initial?.characterAssetId ?? null);
     const seedLat = initial?.latitude ?? defaultLatitude;
@@ -255,10 +253,6 @@ export function CharacterEditorModal({
   const handleSave = () => {
     if (!name.trim()) {
       setError('Give the character a name.');
-      return;
-    }
-    if (!dialogue.trim()) {
-      setError('Write what the character says when found.');
       return;
     }
     if (!hint.trim()) {
@@ -318,7 +312,6 @@ export function CharacterEditorModal({
       ...(characterAssetId ? { characterAssetId } : {}),
       ...(sponsorBannerId ? { sponsorBannerId } : {}),
       hint: hint.trim(),
-      dialogue: dialogue.trim(),
       key: characterKey.trim() || generateCharacterKey(),
       // Omitted entirely when empty, so key-only characters keep the exact
       // pre-questions shape in storage and exports.
@@ -565,23 +558,6 @@ export function CharacterEditorModal({
       </div>
 
       <div className="field">
-        <label className="fieldLabel" htmlFor="char-dialogue">
-          Dialogue on Discovery *
-        </label>
-        <textarea
-          id="char-dialogue"
-          className="textarea"
-          value={dialogue}
-          onChange={(e) => setDialogue(e.target.value)}
-          placeholder="I have guarded this gate for four centuries. The next sentinel waits by the fountain."
-        />
-        <p className="fieldHelp">
-          What this location&apos;s character says when it is found here — spoken aloud with its
-          video on the reveal.
-        </p>
-      </div>
-
-      <div className="field">
         <label className="fieldLabel" htmlFor="char-sponsor">
           <Megaphone size={12} /> Sponsor Banner (optional)
         </label>
@@ -636,7 +612,7 @@ export function CharacterEditorModal({
       </div>
 
       {/* Reveal-question gate: asked after the key matches and before the
-          character's dialogue/video unlocks. Optional — no questions means the
+          character's video unlocks. Optional — no questions means the
           key alone opens the character (the original behaviour). */}
       <div className="field">
         <span className="fieldLabel">

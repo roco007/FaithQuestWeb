@@ -303,7 +303,6 @@ function normaliseImportedCharacter(raw: unknown, index: number): HuntCharacter 
     characterAssetId: text(raw.characterAssetId).trim() || undefined,
     sponsorBannerId: text(raw.sponsorBannerId).trim() || null,
     hint: text(raw.hint),
-    dialogue: text(raw.dialogue),
     key: text(raw.key).trim() || undefined,
     // Strict boolean: a hand-written file only marks the treasure when the value
     // is literally true. The legacy `isCongratulations` name is still accepted

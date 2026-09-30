@@ -25,7 +25,8 @@ export interface HuntQuestionOption {
 
 /**
  * A question the player must answer AFTER presenting the character's key and
- * BEFORE its reveal (dialogue + video) starts. All of a character's questions
+ * BEFORE its reveal (its video and the hand-over) starts. All of a character's
+ * questions
  * must be answered correctly to record the discovery.
  *
  * `text` questions fuzzy-match the player's typed answer against `answers`
@@ -79,8 +80,8 @@ export interface HuntCharacter {
   /**
    * Optional ID from `public/marketing/manifest.json`. When present, the AR
    * camera shows that business banner in a card above the character — the
-   * banner alone before the key is entered, combined with the hint/reveal
-   * dialogue after it. When absent, the hint bubble keeps its current layout
+   * banner alone before the key is entered, combined with the clue after it.
+   * When absent, the hint bubble keeps its current layout
    * above the character's head.
    */
   sponsorBannerId?: string | null;
@@ -92,8 +93,6 @@ export interface HuntCharacter {
    * describe the place and not the character waiting on it.
    */
   hint: string;
-  /** What the character says when found — played with its video on arrival. */
-  dialogue: string;
   /**
    * **K** — the key that unlocks this location's questions. Authored here and
    * handed to the team one stop early (see `hint`), so it is in their hand while
@@ -105,7 +104,7 @@ export interface HuntCharacter {
   key?: string;
   /**
    * **Q** — the questions asked here, once the key is accepted: this location's
-   * character, dialogue, video and the hand-over that follows all stay locked
+   * character, video and the hand-over that follows all stay locked
    * until every question is answered correctly. Empty/absent = the key alone
    * unlocks the location (games predating this feature, or locations with no
    * gate).

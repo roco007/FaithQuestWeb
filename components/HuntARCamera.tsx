@@ -92,7 +92,7 @@ interface HuntARCameraProps {
   /**
    * The character standing at the current stop's pin — the **next** location's
    * character, supplied by `HuntContext` (see `characterMetAt`). It is what the
-   * frame renders and what speaks: its name, model, video, dialogue. The stop
+   * frame renders and what speaks: its name, model and video. The stop
    * itself (the pin, radius, clue, key and questions) stays on `currentCharacter`
    * inside this component.
    */
@@ -128,18 +128,16 @@ function spellKey(key: string): string {
 }
 
 /**
- * What the character says once the right key is presented: its dialogue, the
- * key it hands over, and the hint for whoever comes next. The native build
- * spoke the dialogue (plus the end announcement on the final find); the web
- * port reads the hand-off aloud too, so the player never has to stare at the
- * screen to catch the next key.
+ * What is read aloud once the right key is presented: the hand-over — the next
+ * location's name, its key and its clue — or, on the final find, the
+ * end-of-hunt announcement. Read out rather than left on screen, so a team
+ * walking on never has to stare at the frame to catch the next key.
  */
 function buildSpeech(result: DiscoverResult): string {
   if (result.isFinal) {
-    return `${result.character.dialogue} ${result.game.endAnnouncement}`.trim();
+    return result.game.endAnnouncement;
   }
   return [
-    result.character.dialogue,
     result.nextCharacter?.name ? `Your next location: ${result.nextCharacter.name}.` : '',
     result.nextCharacter?.key ? `Your next key is ${spellKey(result.nextCharacter.key)}.` : '',
     result.nextCharacter?.hint ? `Your next clue: ${result.nextCharacter.hint}` : '',
@@ -156,7 +154,6 @@ function buildSpeech(result: DiscoverResult): string {
  */
 function buildMeetingSpeech(character: HuntCharacter): string {
   return [
-    character.dialogue,
     character.key ? `Your key for ${character.name} is ${spellKey(character.key)}.` : '',
     character.hint ? `Your clue: ${character.hint}` : '',
   ]
@@ -772,7 +769,7 @@ export function HuntARCamera({
 
   /**
    * The single path into `reveal`: records nothing itself (the context call
-   * that produced `result` already did) and starts the dialogue's text + voice
+   * that produced `result` already did) and starts the hand-over's voice
    * — unless the character is a cutout video with its own audio, which rolls
    * with its own sound instead. The voice cue starts a cutout video from
    * frame 1 either way.
@@ -849,7 +846,7 @@ export function HuntARCamera({
   /**
    * Submits the current question's answer. A wrong answer keeps the player on
    * the same question; only once every question has passed is the discovery
-   * recorded and the reveal (dialogue, next key, video) started.
+   * recorded and the reveal (hand-over, next key, video) started.
    */
   const handleQuizSubmit = useCallback(async () => {
     if (quizChecking || phase !== 'quiz') return;
@@ -1023,17 +1020,12 @@ export function HuntARCamera({
 
   /**
    * Bubble content over the model's head: the clue that points at the character
-   * while hunting, then the character's own words once its key is accepted. The
-   * reveal docks into the bottom HUD when the character is off screen, so
-   * lowering the phone can never lose the message.
+   * while hunting. Once a reveal starts the head text steps aside: the bubble
+   * carries the hand-over card instead (`RevealDetails`), which docks into the
+   * bottom HUD when the character is off screen, so lowering the phone can never
+   * lose the message.
    */
-  const bubbleText = reveal
-    ? characterOnScreen
-      ? `“${reveal.character.dialogue}”`
-      : null
-    : showHeadHint
-      ? stopCharacter?.hint ?? null
-      : null;
+  const bubbleText = reveal ? null : showHeadHint ? stopCharacter?.hint ?? null : null;
 
   return (
     <div className="arCamera" role="dialog" aria-modal="true" aria-label="AR camera view">
@@ -1061,7 +1053,11 @@ export function HuntARCamera({
           mediaRestartToken={voiceCue}
           hint={bubbleText}
           speaker={showHeadHint ? stopCharacter?.name ?? null : null}
-          label={reveal ? `${revealSpeaker ?? 'They'} — ${speaking ? 'SPEAKING…' : 'SAYS'}` : null}
+          label={
+            reveal
+              ? `${revealSpeaker ?? 'They'}${speaking ? ' — SPEAKING…' : ''}`
+              : null
+          }
           bubbleExtra={reveal ? <RevealDetails result={reveal} /> : null}
           accent={characterMeta?.accent}
           sponsorBanner={sponsorBanner}
@@ -1359,10 +1355,10 @@ export function HuntARCamera({
                 <div className="arBubbleHeader">
                   <span className="arBubbleDot" style={{ background: characterMeta?.accent }} />
                   <span className="arBubbleSpeaker" style={{ color: characterMeta?.accent }}>
-                    {revealSpeaker ?? 'They'} — {speaking ? 'SPEAKING…' : 'SAYS'}
+                    {revealSpeaker ?? 'They'}
+                    {speaking ? ' — SPEAKING…' : ''}
                   </span>
                 </div>
-                <p className="arBubbleText">“{reveal.character.dialogue}”</p>
                 <RevealDetails result={reveal} />
               </div>
             )}

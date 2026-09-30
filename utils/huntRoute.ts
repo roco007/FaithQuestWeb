@@ -207,7 +207,7 @@ export function characterMetAt(
 /**
  * The route a team actually plays: the hunt's locations in this team's order,
  * each one exactly as the creator authored it — its own coordinates, radius,
- * clue, character (name, subtitle, dialogue, asset, banner), questions and key.
+ * clue, character (name, subtitle, asset, banner), questions and key.
  *
  * Nothing is rewritten here, and that is the point: a location is the unit of
  * the hunt, so whatever the radar points at, the question gate asks and the

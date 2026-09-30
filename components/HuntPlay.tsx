@@ -5,6 +5,7 @@ import { ArrowLeft, Radar, MapPin, Compass, Lock, PartyPopper, Camera } from 'lu
 import { useHunt, DiscoverResult } from '../context/HuntContext';
 import { useHuntRadar } from '../hooks/useHuntRadar';
 import { formatDistance } from '../utils/geo';
+import { characterMetAt } from '../utils/huntRoute';
 import { loadCharacterAssets, type CharacterAssetKind } from '../services/characterAssets';
 import { Modal } from './Modal';
 import { HuntARCamera } from './HuntARCamera';
@@ -53,8 +54,8 @@ interface HuntPlayProps {
  * radius, open the camera and hold the reticle on the character composited
  * over the live feed. The sighted character then stays on screen while the key
  * is presented in the form docked at the bottom of the frame — nothing advances
- * until it matches — and answers with its dialogue, video and the hand-over of
- * the next location. Strict visibility applies outside the radius: locations
+ * until it matches — and answers with its video and the hand-over of the next
+ * location. Strict visibility applies outside the radius: locations
  * beyond the one just handed over stay anonymous in the route list, and distance
  * and bearing wait behind the explicit location check. The key the player is
  * holding (`KeyInHand`) rides under the progress bar in every state of the hunt,
@@ -413,7 +414,7 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
                       </div>
                       <div className={`routeSub${isDone ? ' routeClue' : ''}`}>
                         {isDone
-                          ? `“${ch.dialogue}”`
+                          ? `Met ${characterMetAt(activeRoute, ch.id)?.name ?? ch.name}`
                           : isRevealed
                             ? ch.subtitle
                             : 'Hidden — undiscovered'}
