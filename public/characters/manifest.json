@@ -36,6 +36,18 @@
       "realHeightM": 1.8,
       "aspectRatio": 0.5634,
       "attribution": "Supplied treasure clip"
+    },
+    {
+      "id": "5second",
+      "name": "5second",
+      "description": "5second",
+      "kind": "video",
+      "src": "/characters/5second.webm",
+      "fallbackType": "guardian",
+      "accent": "#f59e0b",
+      "realHeightM": 1.8,
+      "aspectRatio": 0.5634,
+      "attribution": "Supplied treasure clip"
     }
   ]
 }
