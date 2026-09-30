@@ -13,10 +13,13 @@ import {
   Camera,
   KeyRound,
   Sparkles,
-  Volume2,
+  RotateCcw,
   ListChecks,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { useHunt, DiscoverResult, assertPresentedKey } from '../context/HuntContext';
+import type { HuntCharacter } from '../types/hunt';
 import { useGame } from '../context/GameContext';
 import { useDeviceOrientation } from '../hooks/useDeviceOrientation';
 import {
@@ -41,9 +44,8 @@ import type { SponsorBanner } from '../services/sponsorBanners';
 import { loadSponsorBanners } from '../services/sponsorBanners';
 import { KeyInHand } from './KeyInHand';
 import { LocationStatus } from './LocationStatus';
-import { formatDistance } from '../utils/geo';
+import { formatDistance, meetingAnchor } from '../utils/geo';
 import { triggerHaptic, playSoundEffect } from '../utils/sound';
-import { speakClue, stopSpeaking } from '../utils/speech';
 import { isQuestionCorrect } from '../utils/huntQuestions';
 
 /** Milliseconds the player must hold aim + range before the character is sighted. */
@@ -75,65 +77,72 @@ interface HuntARCameraProps {
   /**
    * Fires when the player dismisses a finished reveal. The caller uses a final
    * discovery to close the camera and celebrate the hunt; the camera itself
-   * moves straight on to the next target otherwise.
+   * moves straight on to the next stop otherwise.
    */
   onDiscoveryComplete?: (result: DiscoverResult) => void;
+  /**
+   * The location whose character greets the team when the round opens. While
+   * set, the camera runs the `meeting` phase: that character appears anchored to
+   * the player — wherever they are standing — hands over its clue and key, and
+   * plays its video if it has one. Nothing is recorded: the stop itself is still
+   * walked to on foot. Null for the rest of the round.
+   */
+  meetingCharacter?: HuntCharacter | null;
+  /** The player dismissed the opening meeting and is ready to walk. */
+  onMeetingComplete?: () => void;
+  /**
+   * The character standing at the current stop's pin — the **next** location's
+   * character, supplied by `HuntContext` (see `characterMetAt`), or the
+   * end-of-hunt character on the stop that finishes the hunt. It is what the
+   * frame renders: its name, model and video. The stop
+   * itself (the pin, radius, clue, key and questions) stays on `currentCharacter`
+   * inside this component.
+   */
+  metCharacter?: HuntCharacter | null;
 }
 
 type CameraState = 'starting' | 'active' | 'error';
 
 /**
  * The discovery loop, every step of it on the camera frame:
- *  - `hunting`: walk inside the radius and hold the reticle on the character;
- *  - `key`:     the sighted character stays on screen while the player presents
- *               the key received at the previous stop — nothing advances until
- *               that key matches;
- *  - `quiz`:    the key matched, but a character with reveal questions demands
- *               them first — every question must be answered before anything
- *               reveals, and the discovery is recorded only once they pass;
- *  - `reveal`:  the key was presented and any question gate passed: the
- *               character's message, the key it hands over and the next
- *               target's hint float over its head (text + voice) until the
- *               player continues.
+ *  - `hunting`:   walk inside the radius and hold the reticle on the location's
+ *                 character (the radar and the handed-over clue point the way);
+ *  - `key`:       the sighted character stays on screen while the player presents
+ *                 this location's key — handed over one stop early, so it is
+ *                 already in hand — and nothing advances until it matches;
+ *  - `quiz`:      the key matched, but a location with questions demands them
+ *                 first — every question must be answered before anything
+ *                 reveals, and the discovery is recorded only once they pass;
+ *  - `reveal`:    the key was presented and any question gate passed: the
+ *                 character's message and video, then the hand-over of the NEXT
+ *                 location's clue, character and key on screen until the
+ *                 player continues. On the treasure there is no hand-over: the
+ *                 end-of-hunt character plays its clip and nothing else, and
+ *                 "Finish hunt" hands the congratulations to the page.
  */
-type ARPhase = 'hunting' | 'key' | 'quiz' | 'reveal';
-
-/** Spells a key out for the voice clue ("K7M2QX" → "K 7 M 2 Q X"). */
-function spellKey(key: string): string {
-  return key
-    .split('')
-    .map(ch => (ch === '-' ? 'dash' : ch))
-    .join(' ');
-}
+type ARPhase = 'meeting' | 'hunting' | 'key' | 'quiz' | 'reveal';
 
 /**
- * What the character says once the right key is presented: its dialogue, the
- * key it hands over, and the hint for whoever comes next. The native build
- * spoke the dialogue (plus the end announcement on the final find); the web
- * port reads the hand-off aloud too, so the player never has to stare at the
- * screen to catch the next key.
+ * The hand-over — the next location's name, its key and its clue — is **on
+ * screen only**. The hunt has no voiceover: nothing is read aloud, so
+ * everything a team needs is written on the frame and stays readable while they
+ * walk on. The last find has no card at all: the end-of-hunt character simply
+ * plays its clip, and the congratulations arrive on the Hunt-over page.
  */
-function buildSpeech(result: DiscoverResult): string {
-  if (result.isFinal) {
-    return `${result.character.dialogue} ${result.game.endAnnouncement}`.trim();
-  }
-  return [
-    result.character.dialogue,
-    result.nextCharacter?.key ? `Your next key is ${spellKey(result.nextCharacter.key)}.` : '',
-    result.nextCharacter?.hint ? `Your next clue: ${result.nextCharacter.hint}` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-}
-
 /**
- * The character's hand-off, shown inside the speech bubble over its head (and
+ * The character's hand-off, shown inside the bubble over its head (and
  * docked into the bottom HUD when WebGL cannot draw the character at all).
  */
 function RevealDetails({ result }: { result: DiscoverResult }) {
   const next = result.nextCharacter;
   return (
     <div className="arBubbleExtra">
+      {next?.name && (
+        <div className="arBubbleMeta">
+          <span className="arBubbleMetaLabel">Next location</span>
+          <p className="arBubbleMetaText">{next.name}</p>
+        </div>
+      )}
       {next?.key && (
         <div className="arBubbleKeyRow">
           <span className="arBubbleMetaLabel">Key received</span>
@@ -142,14 +151,8 @@ function RevealDetails({ result }: { result: DiscoverResult }) {
       )}
       {next?.hint && (
         <div className="arBubbleMeta">
-          <span className="arBubbleMetaLabel">Hint for your next target</span>
+          <span className="arBubbleMetaLabel">Hint for your next location</span>
           <p className="arBubbleMetaText">{next.hint}</p>
-        </div>
-      )}
-      {result.isFinal && (
-        <div className="arBubbleMeta">
-          <span className="arBubbleMetaLabel">Hunt complete</span>
-          <p className="arBubbleMetaText">{result.game.endAnnouncement}</p>
         </div>
       )}
     </div>
@@ -162,13 +165,23 @@ function RevealDetails({ result }: { result: DiscoverResult }) {
  * off-screen direction guidance — the web port of `app/hunt/ar.tsx`.
  *
  * Discovery flow (every step of it on the frame, see `ARPhase`): hold the
- * reticle on the character while inside its radius, present the key from the
- * previous stop in the docked form, pass the character's reveal questions when
- * it has any, and only then the character answers in text + voice with the key
- * and hint for its next target. Only a matching key and a passed question gate
- * advance the hunt — until then the character simply stays in view.
+ * reticle on the character while inside its radius, present this location's key
+ * in the docked form — handed over one stop early, so the team already holds it
+ * — pass the location's reveal questions when it has any, and only then the
+ * character answers with the hand-over for the stop ahead, on screen:
+ * the next location's clue, character and key. Only a matching key and a passed
+ * question gate advance the hunt — until then the character simply stays in
+ * view. On the treasure there is no hand-over: the end-of-hunt character plays
+ * its clip full-frame, and the congratulations wait on the Hunt-over page.
  */
-export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCameraProps) {
+export function HuntARCamera({
+  open,
+  onClose,
+  onDiscoveryComplete,
+  meetingCharacter = null,
+  onMeetingComplete,
+  metCharacter = null,
+}: HuntARCameraProps) {
   const { currentCharacter, discoverCurrentCharacter } = useHunt();
   const { userLocation } = useGame();
 
@@ -200,14 +213,27 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   const [quizError, setQuizError] = useState<string | null>(null);
   /** True while the final pass is being recorded (discovery in flight). */
   const [quizChecking, setQuizChecking] = useState(false);
-  /** Set once the right key is presented — drives the speech over the head. */
+  /** Set once the right key is presented — drives the hand-over card. */
   const [reveal, setReveal] = useState<DiscoverResult | null>(null);
+  /**
+   * The stop the current reveal belongs to. Recording the **last** discovery
+   * empties the route — `currentCharacter` goes null — but the character being
+   * congratulated still has to stand on its pin. The cleared stop is kept for
+   * exactly as long as its reveal is on screen, so the pin (and with it the
+   * character composited on that pin) survives the end of the hunt.
+   */
+  const [revealedStop, setRevealedStop] = useState<HuntCharacter | null>(null);
+  /**
+   * The player paused a video character's clip on the frame. Gating `mediaPlaying`
+   * off is all it takes: the 3D layer pauses the cutout, and because the restart
+   * token is not bumped, resuming continues from the same frame rather than
+   * rewinding.
+   */
+  const [videoPaused, setVideoPaused] = useState(false);
   /** Deployment-owned roster resolved from the selected character's asset ID. */
   const [characterAssets, setCharacterAssets] = useState<CharacterAsset[]>([]);
-  /** True while the reveal is being read aloud (drives the replay button). */
-  const [speaking, setSpeaking] = useState(false);
-  /** Bumped each time the reveal voiceover (re)starts, to cue media assets. */
-  const [voiceCue, setVoiceCue] = useState(0);
+  /** Bumped each time a character's clip (re)starts, to cue media assets. */
+  const [mediaCue, setMediaCue] = useState(0);
   /**
    * Height of the on-screen keyboard covering the docked key form. Mobile
    * browsers shrink the *visual* viewport without resizing the layout one, so
@@ -245,11 +271,32 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
 
   /**
    * The character the frame is locked to. Once a reveal starts the hunt has
-   * already advanced to the next target, so the view keeps framing the
+   * already advanced to the next stop, so the view keeps framing the
    * character that was just unlocked — that is what stops the discovered
    * character from vanishing the moment its key is accepted.
    */
-  const activeCharacter = reveal?.character ?? currentCharacter;
+  /**
+   * The stop: the location the team is walking to. It owns everything about the
+   * *place* — the pin, the radius, the clue, the key and the questions.
+   *
+   * While a reveal is up this is the stop that reveal belongs to, because the
+   * final discovery is what clears the route: without it the pin would vanish
+   * under the last character, taking the whole AR scene — and the end-of-hunt
+   * clip playing on it — down with it.
+   */
+  const stopCharacter = currentCharacter ?? revealedStop;
+  /**
+   * The character on screen: whoever is met here. The meeting greets with the
+   * first stop's own character; after that it is the next location's character
+   * (`metCharacter`) — the end-of-hunt character on the last stop — and once a
+   * reveal starts it is whoever they just met. Swapping this in is the only
+   * thing that changes who stands on the frame: a clip holds its first frame
+   * while the team walks in and types the key, and rolls from frame 1 when the
+   * key is accepted.
+   */
+  const activeCharacter = phase === 'meeting'
+    ? meetingCharacter ?? reveal?.character ?? stopCharacter
+    : reveal?.character ?? metCharacter ?? stopCharacter;
 
   // Resolve only the manifest ID saved with the hunt. Keeping paths in the
   // manifest means a pasted/shared hunt can never make the camera fetch an
@@ -276,12 +323,22 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
       characterAssets.find(asset => asset.id === activeCharacter?.characterAssetId) ?? null,
     [activeCharacter?.characterAssetId, characterAssets]
   );
+  /** True for a cutout roster character — the only kind that plays a clip. */
+  const isVideoCharacter = characterAsset?.kind === 'video';
   /**
-   * A cutout-video roster character speaks through its own clip: it carries the
-   * reveal audio, so the TTS voiceover stands down and the video's track plays
-   * instead.
+   * Pause and replay only exist where a clip is actually rolling: the meeting
+   * greeting and a reveal. While hunting a cutout is held on frame 1, so there
+   * would be nothing to pause or replay.
    */
-  const videoCharacterVoice = characterAsset?.kind === 'video';
+  const canPauseVideo = isVideoCharacter && (phase === 'meeting' || phase === 'reveal');
+
+  /**
+   * Who the reveal is credited to in the bubble. A location's name is the
+   * *place*, so it captions the bubble rather than standing in for it: the roster
+   * entry's own name is used whenever the character has one, and the location
+   * name is only the fallback.
+   */
+  const revealSpeaker = characterAsset?.name ?? reveal?.character.name ?? null;
 
   const renderCharacterType = characterAsset?.fallbackType ?? activeCharacter?.characterType;
 
@@ -304,26 +361,52 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   }, []);
 
   const sponsorBanner = useMemo(
-    () => sponsorBanners.find(banner => banner.id === activeCharacter?.sponsorBannerId) ?? null,
-    [sponsorBanners, activeCharacter]
+    () => sponsorBanners.find(banner => banner.id === stopCharacter?.sponsorBannerId) ?? null,
+    [sponsorBanners, stopCharacter]
   );
 
   const target = useMemo(() => {
-    if (!activeCharacter) return null;
+    if (!stopCharacter) return null;
+    if (phase === 'meeting') {
+      // Anchored to the player, not to the stop's pin: the team is not there yet,
+      // so the character that greets them stands a fixed distance in front of the
+      // camera rather than on a creator-authored coordinate.
+      if (!userLocation) return null;
+      return { ...meetingAnchor(userLocation), altitudeMeters: 0 };
+    }
+    // The pin belongs to the stop, not to whoever is met on it: the team walks
+    // to this place, so this is where the figure is composited.
     return {
-      latitude: activeCharacter.latitude,
-      longitude: activeCharacter.longitude,
-      altitudeMeters: activeCharacter.altitudeMeters,
+      latitude: stopCharacter.latitude,
+      longitude: stopCharacter.longitude,
+      altitudeMeters: stopCharacter.altitudeMeters,
     };
-  }, [activeCharacter]);
+  }, [stopCharacter, phase, userLocation]);
 
   // Listeners stay cheap while closed; the target is nulled so auto-aim idles.
-  const orientation = useDeviceOrientation(open ? target : null);
+  // The meeting needs no compass: its anchor is the player, not a bearing.
+  const orientation = useDeviceOrientation(open && phase !== 'meeting' ? target : null);
 
   const placement = useMemo<ARPlacement | null>(() => {
-    if (!open || !userLocation || !target || orientation.heading === null || dims.width === 0) {
-      return null;
+    if (!open || !userLocation || !target || dims.width === 0) return null;
+    if (phase === 'meeting') {
+      // Framed from the meeting anchor itself: the same bearing it was placed
+      // along, so it is dead ahead of the camera at a known distance. The
+      // `identified` framing below then pins it to the middle of the free band,
+      // which keeps it steady — a solved position would otherwise shake with
+      // every metre of GPS error and degree of compass wobble.
+      return computeARPlacement({
+        userLocation,
+        target,
+        headingDeg: 0,
+        pitchRad: 0,
+        screenW: dims.width,
+        screenH: dims.height,
+      });
     }
+    // Every stop is geo-anchored on its own authored coordinates: whatever the
+    // radar pointed at while walking is exactly what the camera frames here.
+    if (orientation.heading === null) return null;
     return computeARPlacement({
       userLocation,
       target,
@@ -332,7 +415,16 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
       screenW: dims.width,
       screenH: dims.height,
     });
-  }, [open, userLocation, target, orientation.heading, orientation.pitch, dims.width, dims.height]);
+  }, [
+    open,
+    userLocation,
+    target,
+    phase,
+    orientation.heading,
+    orientation.pitch,
+    dims.width,
+    dims.height,
+  ]);
 
   const characterSizing = useMemo(() => {
     if (!activeCharacter) return null;
@@ -354,7 +446,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     dims.height -
       (phase === 'key'
         ? KEY_PANEL_RESERVE_PX
-        : phase === 'quiz'
+        : phase === 'quiz' || phase === 'meeting'
           ? QUIZ_PANEL_RESERVE_PX
           : BOTTOM_HUD_RESERVE_PX),
     hudSafeTopPx
@@ -364,11 +456,16 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     hudSafeBottomPx - hudSafeTopPx - dims.height * MIN_MODEL_BAND_FRACTION,
     0
   );
+  /**
+   * True when the reveal has a hand-over card to show. The last find has none —
+   * it is video-only — which is what hands the whole frame to the clip.
+   */
+  const revealHasCard = Boolean(reveal && !reveal.isFinal);
   /** The clue pointing at the character, or its hand-off once the key matched. */
   const wantsHeadBubble =
     cameraState === 'active' &&
     activeCharacter !== null &&
-    (phase === 'hunting' ? Boolean(activeCharacter.hint) : phase === 'reveal');
+    (phase === 'hunting' ? Boolean(stopCharacter?.hint) : phase === 'meeting' || revealHasCard);
   /**
    * A selected banner takes over the slot above the character in every phase:
    * the banner alone before the key is entered (hunting + key entry), the
@@ -380,7 +477,11 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     sponsorBanner !== null &&
     cameraState === 'active' &&
     activeCharacter !== null &&
-    (phase === 'hunting' || phase === 'key' || phase === 'quiz' || phase === 'reveal');
+    (phase === 'meeting' ||
+      phase === 'hunting' ||
+      phase === 'key' ||
+      phase === 'quiz' ||
+      phase === 'reveal');
   const wantsTopDialogue = bannerCardWanted || (sponsorBanner === null && wantsHeadBubble);
   /**
    * Headroom kept free above the character for whatever occupies the slot.
@@ -417,7 +518,12 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    * size breathes — very obvious at close range. Pinning it to a fixed frame
    * removes the shake entirely and keeps it steady while the key is typed.
    */
-  const identified = isLocking || phase === 'key' || phase === 'quiz' || phase === 'reveal';
+  const identified =
+    isLocking ||
+    phase === 'meeting' ||
+    phase === 'key' ||
+    phase === 'quiz' ||
+    phase === 'reveal';
 
   /** The slice of the screen the character may occupy — HUD and bubble excluded. */
   const viewport = useMemo<ARViewportBox>(
@@ -481,7 +587,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
 
   // Open/close lifecycle: reset the discovery loop, ask iOS for motion
   // permission (must happen inside the opening gesture's transient activation
-  // window), start the feed, and always release camera + voice on the way out.
+  // window), start the feed, and always release the camera on the way out.
   useEffect(() => {
     if (!open) return;
     sightedRef.current = false;
@@ -490,7 +596,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     setRendererAvailable(true);
     // Closing the camera drops a pending key entry: the character has to be
     // sighted again on reopen (it is right in front of the player anyway).
-    setPhase('hunting');
+    // A round that has not met its first location yet reopens on the meeting.
+    setPhase(meetingCharacter ? 'meeting' : 'hunting');
     setReveal(null);
     setKeyInput('');
     setKeyError(null);
@@ -499,16 +606,28 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     setQuizText('');
     setQuizError(null);
     setQuizChecking(false);
-    setSpeaking(false);
-    setVoiceCue(0);
+    setMediaCue(0);
+    setVideoPaused(false);
     void orientation.requestOrientationPermission();
     void startCamera();
     return () => {
       stopCamera();
-      stopSpeaking();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // The opening meeting: run it whenever the round still owes the player one
+  // (nothing discovered yet) and the camera is open. Dismissal clears it, so it
+  // never returns mid-round; backing out of the camera leaves it pending, and it
+  // greets the team again on the next open.
+  useEffect(() => {
+    if (!open) return;
+    if (meetingCharacter && phase !== 'meeting') {
+      setPhase('meeting');
+      return;
+    }
+    if (!meetingCharacter && phase === 'meeting') setPhase('hunting');
+  }, [open, meetingCharacter, phase]);
 
   // Escape-to-close + body scroll lock, mirroring `Modal`.
   useEffect(() => {
@@ -550,10 +669,10 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     open &&
     phase === 'hunting' &&
     placement !== null &&
-    activeCharacter !== null &&
+    stopCharacter !== null &&
     cameraState === 'active' &&
     placement.isWithinAimCone &&
-    placement.distanceMeters <= activeCharacter.radiusMeters;
+    placement.distanceMeters <= stopCharacter.radiusMeters;
 
   /** Lock-on complete: the character holds its ground and asks for the key. */
   const handleSighted = useCallback(() => {
@@ -586,6 +705,31 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   }, [canLock, handleSighted]);
 
   /**
+   * The opening meeting: greets the team on the frame, shows its hand-over and
+   * unlocks its video, but records nothing — the stop is still walked to.
+   */
+  const beginMeeting = useCallback(() => {
+    setReveal(null);
+    setVideoPaused(false);
+    setPhase('meeting');
+    triggerHaptic('success');
+    setMediaCue(cue => cue + 1);
+  }, []);
+
+  // Greet once per meeting: the latch clears whenever the meeting is not running,
+  // so reopening the camera before dismissing it greets the team again.
+  const meetingGreetedRef = useRef(false);
+  useEffect(() => {
+    if (!open || phase !== 'meeting' || !meetingCharacter) {
+      meetingGreetedRef.current = false;
+      return;
+    }
+    if (meetingGreetedRef.current) return;
+    meetingGreetedRef.current = true;
+    beginMeeting();
+  }, [open, phase, meetingCharacter, beginMeeting]);
+
+  /**
    * The reveal-question gate for the sighted character. Derived fresh each
    * render: during `quiz` nothing has been recorded yet, so `currentCharacter`
    * is still the character being questioned.
@@ -608,26 +752,24 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
 
   /**
    * The single path into `reveal`: records nothing itself (the context call
-   * that produced `result` already did) and starts the dialogue's text + voice
-   * — unless the character is a cutout video with its own audio, which rolls
-   * with its own sound instead. The voice cue starts a cutout video from
-   * frame 1 either way.
+   * that produced `result` already did) and shows the hand-over card. The media
+   * cue starts a cutout video from frame 1. The cleared `stop` is held for the
+   * reveal's lifetime — it is the pin the character stands on, and on the last
+   * find it is the only thing keeping that pin alive.
    */
   const beginReveal = useCallback(
-    (result: DiscoverResult) => {
+    (result: DiscoverResult, stop: HuntCharacter) => {
       setKeyInput('');
       setKeyError(null);
+      setRevealedStop(stop);
       setReveal(result);
+      setVideoPaused(false);
       setPhase('reveal');
       triggerHaptic('success');
       playSoundEffect(result.isFinal ? 'level_up' : 'correct');
-      setVoiceCue(cue => cue + 1);
-      if (!videoCharacterVoice) {
-        setSpeaking(true);
-        void speakClue(buildSpeech(result), { onDone: () => setSpeaking(false) });
-      }
+      setMediaCue(cue => cue + 1);
     },
-    [videoCharacterVoice]
+    []
   );
 
   /**
@@ -647,8 +789,11 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
         setKeyError('This hunt has nothing left to discover.');
         return;
       }
+      // Held for the reveal below: the stop is gone from the route by then.
       if (character.questions && character.questions.length > 0) {
-        // Same mismatch error as the context — but nothing recorded yet.
+        // Same mismatch error as the context — but nothing recorded yet. The
+        // key earns the right to be asked; the discovery stays locked behind
+        // the questions.
         assertPresentedKey(character, keyInput);
         setKeyError(null);
         resetQuiz();
@@ -662,7 +807,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
         setKeyError('This hunt has nothing left to discover.');
         return;
       }
-      beginReveal(result);
+      beginReveal(result, character);
     } catch (err) {
       setKeyError(err instanceof Error ? err.message : 'That key does not match — try again.');
       triggerHaptic('warning');
@@ -683,12 +828,13 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   /**
    * Submits the current question's answer. A wrong answer keeps the player on
    * the same question; only once every question has passed is the discovery
-   * recorded and the reveal (dialogue, next key, video) started.
+   * recorded and the reveal (hand-over, next key, video) started.
    */
   const handleQuizSubmit = useCallback(async () => {
     if (quizChecking || phase !== 'quiz') return;
     const question = quizQuestions[quizIndex];
-    if (!currentCharacter || !question) return;
+    const stop = currentCharacter;
+    if (!stop || !question) return;
 
     if (!isQuestionCorrect(question, quizChoice, quizText)) {
       setQuizError(
@@ -722,7 +868,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
         playSoundEffect('wrong');
         return;
       }
-      beginReveal(result); // brings its own success sound and voice cue
+      // `stop` is the pin the reveal keeps; the route is already one shorter.
+      beginReveal(result, stop); // brings its own success sound and media cue
     } catch (err) {
       // The key was checked when the quiz opened; this covers the hunt having
       // moved underneath us (e.g. the character discovered elsewhere).
@@ -745,16 +892,17 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     beginReveal,
   ]);
 
-  /** Re-reads the character's message aloud (the native "replay voice clue"). */
-  const handleReplayVoice = useCallback(() => {
-    if (!reveal) return;
-    // Restart the cutout video from frame 1 so it stays in sync with the voice.
-    setVoiceCue(cue => cue + 1);
-    // A video character replays its own audio — no TTS voiceover on top.
-    if (videoCharacterVoice) return;
-    setSpeaking(true);
-    void speakClue(buildSpeech(reveal), { onDone: () => setSpeaking(false) });
-  }, [reveal, videoCharacterVoice]);
+  /**
+   * Replays a video character from frame 1 — the only thing there is to replay
+   * now that nothing is read aloud. Lifting a pause matters: the rewind only
+   * runs while the clip is playing, so a replay while paused would do nothing
+   * visible. A character with no video has no replay at all
+   * (`canReplayVideo`); its hand-over is on screen to read.
+   */
+  const handleReplayVideo = useCallback(() => {
+    setVideoPaused(false);
+    setMediaCue(cue => cue + 1);
+  }, []);
 
   /**
    * Dismisses the reveal. A non-final discovery re-arms the frame for the next
@@ -763,12 +911,12 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    */
   const handleRevealContinue = useCallback(() => {
     if (!reveal) return;
-    stopSpeaking();
-    setSpeaking(false);
-    setVoiceCue(0);
+    setVideoPaused(false);
+    setMediaCue(0);
     onDiscoveryComplete?.(reveal);
     if (reveal.isFinal) return;
     setReveal(null);
+    setRevealedStop(null);
     setPhase('hunting');
     setKeyError(null);
     setLockRatio(0);
@@ -789,22 +937,25 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
   const guidance = (() => {
     if (reveal) {
       return reveal.isFinal
-        ? 'Hunt complete — the treasure is yours!'
-        : `${reveal.character.name} hands over your next key`;
+        ? 'Last find — press Finish hunt when you are ready'
+        : `Key received — next location: ${reveal.nextCharacter?.name ?? 'coming up'}`;
     }
-    if (phase === 'key' && activeCharacter) {
-      return `Sighted ${activeCharacter.name} — present your key below`;
+    if (phase === 'meeting' && activeCharacter) {
+      return `${activeCharacter.name} has your clue and key — then walk to ${activeCharacter.name}`;
     }
-    if (phase === 'quiz' && activeCharacter) {
+    if (phase === 'key' && stopCharacter) {
+      return `At ${stopCharacter.name} — present your key below`;
+    }
+    if (phase === 'quiz' && stopCharacter) {
       return `Key accepted — answer ${quizQuestions.length} question${
         quizQuestions.length === 1 ? '' : 's'
-      } to unlock ${activeCharacter.name}`;
+      } to open ${stopCharacter.name}`;
     }
     if (cameraState === 'starting') return 'Starting camera…';
     if (cameraState === 'error') return 'Camera unavailable';
     if (!userLocation) return 'Acquiring GPS signal…';
     if (!placement || activeCharacter === null) return 'Calibrating sensors…';
-    if (placement.distanceMeters > activeCharacter.radiusMeters) {
+    if (stopCharacter && placement.distanceMeters > stopCharacter.radiusMeters) {
       return `Move closer — ${formatDistance(placement.distanceMeters)} to go`;
     }
     if (!placement.isInView) {
@@ -838,7 +989,10 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    * banner — so the clue stays in the bottom hint bar.
    */
   const showHeadHint =
-    phase === 'hunting' && characterOnScreen && !!activeCharacter && sponsorBanner === null;
+    (phase === 'hunting' || phase === 'meeting') &&
+    characterOnScreen &&
+    !!activeCharacter &&
+    sponsorBanner === null;
 
   /**
    * The sponsor card owns the slot above the character while a banner is
@@ -851,17 +1005,12 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
 
   /**
    * Bubble content over the model's head: the clue that points at the character
-   * while hunting, then the character's own words once its key is accepted. The
-   * reveal docks into the bottom HUD when the character is off screen, so
-   * lowering the phone can never lose the message.
+   * while hunting. Once a reveal starts the head text steps aside: the bubble
+   * carries the hand-over card instead (`RevealDetails`), which docks into the
+   * bottom HUD when the character is off screen, so lowering the phone can never
+   * lose the message.
    */
-  const bubbleText = reveal
-    ? characterOnScreen
-      ? `“${reveal.character.dialogue}”`
-      : null
-    : showHeadHint
-      ? activeCharacter?.hint ?? null
-      : null;
+  const bubbleText = reveal ? null : showHeadHint ? stopCharacter?.hint ?? null : null;
 
   return (
     <div className="arCamera" role="dialog" aria-modal="true" aria-label="AR camera view">
@@ -875,22 +1024,17 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
           characterAsset={characterAsset}
           frame={canvasFrame}
           renderActive={true}
-          // Cutout videos hold frame 1 until the key is accepted; during the
-          // reveal they roll while the voiceover speaks (freeze on end, restart
-          // from frame 1 on replay) — or for the whole reveal when the clip is
-          // its own voice, or when no TTS engine exists to sync to.
+          // Cutout videos hold frame 1 until the key is accepted; through the
+          // meeting greeting and the reveal they roll (freeze on end, restart
+          // from frame 1 on a replay).
           mediaPlaying={
-            phase === 'reveal' &&
-            (videoCharacterVoice ||
-              speaking ||
-              typeof window === 'undefined' ||
-              !('speechSynthesis' in window))
+            (phase === 'reveal' || phase === 'meeting') && !videoPaused
           }
-          mediaRestartToken={voiceCue}
+          mediaRestartToken={mediaCue}
           hint={bubbleText}
-          speaker={showHeadHint ? activeCharacter.name : null}
-          label={reveal ? `${reveal.character.name} — ${speaking ? 'SPEAKING…' : 'SAYS'}` : null}
-          bubbleExtra={reveal ? <RevealDetails result={reveal} /> : null}
+          speaker={showHeadHint ? stopCharacter?.name ?? null : null}
+          label={revealHasCard ? (revealSpeaker ?? 'They') : null}
+          bubbleExtra={reveal && !reveal.isFinal ? <RevealDetails result={reveal} /> : null}
           accent={characterMeta?.accent}
           sponsorBanner={sponsorBanner}
           showSponsorCard={showSponsorCard}
@@ -910,7 +1054,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
             {characterMeta && (
               <span className="arChipDot" style={{ background: characterMeta.accent }} />
             )}
-            <span className="arTargetChipText">{activeCharacter?.name ?? 'No target'}</span>
+            <span className="arTargetChipText">{stopCharacter?.name ?? 'No target'}</span>
           </div>
           <div className="arTargetChipMetaRow">
             <MapPin size={10} />
@@ -986,26 +1130,44 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
         {activeCharacter && (
           <div className="arChips">
             <KeyInHand variant="chip" />
+            {/* Pause / resume a video character's clip while it plays — the
+                greeting at the meeting and the hand-over at a reveal. */}
+            {canPauseVideo && (
+              <button
+                type="button"
+                className={`arChip arChipBtn${videoPaused ? ' arChipBtnPaused' : ''}`}
+                onClick={() => setVideoPaused(paused => !paused)}
+                aria-pressed={videoPaused}
+                title={
+                  videoPaused
+                    ? 'Play this character\u2019s video'
+                    : 'Pause this character\u2019s video'
+                }
+              >
+                {videoPaused ? <Play size={11} /> : <Pause size={11} />}
+                {videoPaused ? 'Play video' : 'Pause video'}
+              </button>
+            )}
           </div>
         )}
 
-        {phase === 'hunting' && activeCharacter && !showHeadHint && (
+        {phase === 'hunting' && stopCharacter && !showHeadHint && (
           <div className="arHintBar">
-            <span className="arHintBarLabel">HINT TO THIS CHARACTER</span>
-            <p className="arHintBarText">{activeCharacter.hint}</p>
+            <span className="arHintBarLabel">HINT TO THIS LOCATION</span>
+            <p className="arHintBarText">{stopCharacter.hint}</p>
           </div>
         )}
 
-        {phase === 'hunting' && activeCharacter && (
+        {phase === 'hunting' && stopCharacter && (
           <div className="arChips">
             <span className="arChip">
               <MapPin size={11} />
-              within {activeCharacter.radiusMeters}m to unlock
+              {`within ${stopCharacter.radiusMeters}m to unlock`}
             </span>
-            {activeCharacter.altitudeMeters > 0 && (
+            {stopCharacter.altitudeMeters > 0 && (
               <span className="arChip arChipAir">
                 <ArrowUp size={11} />
-                {activeCharacter.altitudeMeters}m above ground
+                {stopCharacter.altitudeMeters}m above ground
               </span>
             )}
           </div>
@@ -1014,12 +1176,59 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
         {/* Raw coordinates + the manual re-check. The camera frame is exactly
             where "it still says walk closer but I am standing here" happens, so
             the answer has to live on the frame too. */}
-        {phase === 'hunting' && activeCharacter && (
-          <LocationStatus target={activeCharacter} variant="compact" />
+        {phase === 'hunting' && stopCharacter && (
+          <LocationStatus target={stopCharacter} variant="compact" />
+        )}
+
+        {/* The opening meeting: the first location's character greets the team
+            wherever they joined, hands over its clue and key, and plays its
+            video. No key, no questions and nothing recorded here — the stop is
+            still walked to, and only arriving there completes it. */}
+        {phase === 'meeting' && activeCharacter && (
+          <div className="arQuizPanel">
+            <span className="arKeyPanelLabel">
+              <Sparkles size={12} /> {activeCharacter.name} meets you here
+            </span>
+            {activeCharacter.hint && (
+              <p className="arBubbleMetaText" style={{ marginTop: 8 }}>
+                {activeCharacter.hint}
+              </p>
+            )}
+            {activeCharacter.key && (
+              <div className="arBubbleKeyRow" style={{ marginTop: 8 }}>
+                <span className="arBubbleMetaLabel">Key received</span>
+                <span className="keyChip mono">{activeCharacter.key}</span>
+              </div>
+            )}
+            <div className="arRevealActions" style={{ marginTop: 10 }}>
+              {canPauseVideo && (
+                <button
+                  type="button"
+                  className="arRevealBtn arRevealReplay"
+                  onClick={handleReplayVideo}
+                >
+                  <RotateCcw size={15} />
+                  Replay video
+                </button>
+              )}
+              <button
+                type="button"
+                className="arRevealBtn arRevealContinue"
+                onClick={onMeetingComplete}
+              >
+                Start walking
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <p className="arKeyHelper">
+              {`Follow the clue to ${activeCharacter.name} and present that key when you get there. Nothing is recorded until you arrive.`}
+            </p>
+          </div>
         )}
 
         {/* Key entry lives on the frame: the sighted character stays in view
-            until the key from the previous stop matches. */}
+            until this location's key matches — the one handed over for it, one
+            stop early (or when the hunt opened, if this is the first stop). */}
         {phase === 'key' && activeCharacter && (
           <div className="arKeyPanel">
             <span className="arKeyPanelLabel">
@@ -1039,7 +1248,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
                   setKeyInput(e.target.value);
                   if (keyError) setKeyError(null);
                 }}
-                placeholder="Key from the previous character"
+                placeholder="Key handed over for this location"
                 autoComplete="off"
                 autoCapitalize="characters"
                 spellCheck={false}
@@ -1061,8 +1270,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
               </p>
             )}
             <p className="arKeyHelper">
-              {activeCharacter.name} stays right here until the right key is presented — the hunt
-              does not move on without it.
+              {`${activeCharacter.name} stays right here until the right key is presented — the hunt does not move on without it.`}
             </p>
           </div>
         )}
@@ -1070,7 +1278,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
         {/* Question gate: a character that has reveal questions keeps its
             message and video locked until every one of them is answered —
             the discovery itself is recorded only after the last pass. */}
-        {phase === 'quiz' && activeCharacter && quizQuestion && (
+        {phase === 'quiz' && stopCharacter && quizQuestion && (
           <div className="arQuizPanel">
             <span className="arKeyPanelLabel">
               <ListChecks size={12} /> Question {quizIndex + 1} of {quizQuestions.length} — answer
@@ -1137,8 +1345,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
               </button>
             </form>
             <p className="arKeyHelper">
-              {activeCharacter.name} reveals nothing — no message, no video — until every question
-              is answered correctly.
+              Nothing at {stopCharacter.name} is revealed — no message, no video — until every
+              question is answered correctly.
             </p>
           </div>
         )}
@@ -1148,27 +1356,28 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
             character is off screen (or WebGL cannot draw it at all). */}
         {phase === 'reveal' && reveal && (
           <>
-            {!characterOnScreen && (
+            {!characterOnScreen && revealHasCard && (
               <div className="arRevealDock">
                 <div className="arBubbleHeader">
                   <span className="arBubbleDot" style={{ background: characterMeta?.accent }} />
                   <span className="arBubbleSpeaker" style={{ color: characterMeta?.accent }}>
-                    {reveal.character.name} — {speaking ? 'SPEAKING…' : 'SAYS'}
+                    {revealSpeaker ?? 'They'}
                   </span>
                 </div>
-                <p className="arBubbleText">“{reveal.character.dialogue}”</p>
                 <RevealDetails result={reveal} />
               </div>
             )}
             <div className="arRevealActions">
-              <button
-                type="button"
-                className="arRevealBtn arRevealReplay"
-                onClick={handleReplayVoice}
-              >
-                <Volume2 size={15} />
-                {speaking ? 'Speaking…' : 'Replay message'}
-              </button>
+              {canPauseVideo && (
+                <button
+                  type="button"
+                  className="arRevealBtn arRevealReplay"
+                  onClick={handleReplayVideo}
+                >
+                  <RotateCcw size={15} />
+                  Replay video
+                </button>
+              )}
               <button
                 type="button"
                 className="arRevealBtn arRevealContinue"

@@ -2,30 +2,6 @@
   "version": 1,
   "characters": [
     {
-      "id": "angel-statue-zsky",
-      "name": "Winged Stone Angel",
-      "description": "A detailed winged statue with a red sword.",
-      "kind": "model",
-      "src": "/characters/angel-statue-zsky.glb",
-      "fallbackType": "angel",
-      "accent": "#fbbf24",
-      "realHeightM": 2.4,
-      "aspectRatio": 1,
-      "attribution": "Zsky"
-    },
-    {
-      "id": "stone-statue-zsky",
-      "name": "Stone Guardian Statue",
-      "description": "A dark stone guardian statue for entrances and gardens.",
-      "kind": "model",
-      "src": "/characters/stone-statue-zsky.glb",
-      "fallbackType": "guardian",
-      "accent": "#38bdf8",
-      "realHeightM": 1.8,
-      "aspectRatio": 1,
-      "attribution": "Zsky"
-    },
-    {
       "id": "video-test-transparent",
       "name": "Transparent Video Test",
       "description": "Test cutout video clip. Loops silently through the hunt camera.",
@@ -36,6 +12,42 @@
       "realHeightM": 1.7,
       "aspectRatio": 0.5625,
       "attribution": "Test clip"
+    },
+    {
+      "id": "found-hidden-treasure",
+      "name": "Found Hidden Treasure",
+      "description": "A digger unearths hidden treasure — the congratulations clip for the hunt finale.",
+      "kind": "video",
+      "src": "/characters/found-hidden-treasure-transparent.webm",
+      "fallbackType": "guardian",
+      "accent": "#f59e0b",
+      "realHeightM": 1.8,
+      "aspectRatio": 0.5634,
+      "attribution": "Supplied treasure clip"
+    },
+    {
+      "id": "char-2",
+      "name": "char-2",
+      "description": "char-2",
+      "kind": "video",
+      "src": "/characters/char2.webm",
+      "fallbackType": "guardian",
+      "accent": "#f59e0b",
+      "realHeightM": 1.8,
+      "aspectRatio": 0.5634,
+      "attribution": "Supplied treasure clip"
+    },
+    {
+      "id": "5second",
+      "name": "5second",
+      "description": "5second",
+      "kind": "video",
+      "src": "/characters/5second.webm",
+      "fallbackType": "guardian",
+      "accent": "#f59e0b",
+      "realHeightM": 1.8,
+      "aspectRatio": 0.5634,
+      "attribution": "Supplied treasure clip"
     }
   ]
 }

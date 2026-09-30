@@ -17,6 +17,7 @@ export default function GamesPage() {
     createdGames,
     activeGame,
     activeProgress,
+    activeRoute,
     currentCharacter,
     isLoading,
     createGame,
@@ -84,12 +85,20 @@ export default function GamesPage() {
   const inviteIsActive = Boolean(invited && activeGame && invited.id === activeGame.id);
 
   const { userLocation } = useGame();
-  // Strict visibility: the hunt list must not leak the current character's
-  // name or clue while the player is still outside its discovery radius.
+  // Strict visibility: the hunt list never leaks how close the current target
+  // is. Its name and clue are legitimately in hand — they arrive with the
+  // hand-over, at the hunt's opening for the first stop — but the radius and
+  // distance only show once the player is inside the discovery zone.
   const currentTargetRevealed = useMemo(() => {
     if (!currentCharacter || !userLocation) return false;
     return evaluateProximity(userLocation, currentCharacter).isWithinRadius;
   }, [currentCharacter, userLocation]);
+
+  // Route-aware opening-stop check: teams get a shuffled route, so the stop the
+  // round opens with is this team's first dealt stop, not authored order 1.
+  const isFirstStop = Boolean(
+    currentCharacter && activeRoute[0]?.id === currentCharacter.id
+  );
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,7 +203,7 @@ export default function GamesPage() {
               </h2>
               <p className="cardSubtitle">
                 {activeProgress.discoveredCharacterIds.length}/{activeGame.characters.length}{' '}
-                characters found · by {activeGame.creatorName}
+                locations found · by {activeGame.creatorName}
               </p>
             </div>
             <div className="activeHuntActions">
@@ -225,23 +234,31 @@ export default function GamesPage() {
                     Searching for <strong>{currentCharacter.name}</strong> —{' '}
                     {currentCharacter.hint}
                   </>
-                ) : currentCharacter.order === 1 ? (
-                  /* The first stop has no earlier character to pass a clue on,
-                     so the creator's briefing *is* the clue: it is readable
-                     before the hunt is even opened, or there is nothing to walk
-                     towards. Later stops keep the hint behind the radius. */
+                ) : isFirstStop ? (
+                  /* The hunt opens with a hand-over: the first location's clue
+                     and character are given before anything is walked, and the
+                     key that opens it is already in the player's hand. */
                   <>
-                    <strong>First clue from the creator</strong> — {currentCharacter.hint}
+                    <strong>First clue</strong> — {currentCharacter.name}:{' '}
+                    {currentCharacter.hint}
                   </>
                 ) : (
-                  <>The next character stays hidden until you walk into its discovery zone.</>
+                  /* Routes are shuffled per team, so the reliable clue for the
+                     next stop is the target's own hint — handed over by the
+                     reveal at the stop before it, together with this character
+                     and the key that opens it. */
+                  <>
+                    <strong>Next clue</strong> — {currentCharacter.name}:{' '}
+                    {currentCharacter.hint}
+                  </>
                 )}
               </span>
             </div>
           )}
 
-          {/* The key the player is holding, always on screen: the first comes
-              from the creator, each later one from the character just found. */}
+          {/* The key the player is holding, always on screen: every key arrives
+              one stop early — the first with the hunt's opening hand-over, each
+              later one with the reveal that ends the stop before it. */}
           <KeyInHand className="keyBarTight" />
         </div>
       )}

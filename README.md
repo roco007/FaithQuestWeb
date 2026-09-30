@@ -23,6 +23,12 @@ npm run build
 npm start
 ```
 
+Checks (route engine + character manifest):
+
+```bash
+npm test
+```
+
 ## What's here
 
 | Route        | Purpose                                                          |
@@ -45,7 +51,6 @@ npm start
 | Persistence | `AsyncStorage`               | `localStorage` (`utils/webStorage.ts`)              |
 | Haptics     | `expo-haptics`               | `navigator.vibrate` (progressive enhancement)       |
 | Audio cues  | Native sound pack            | Web Audio API synthesized tones                     |
-| Voice clues | Native TTS                   | `speechSynthesis`                                   |
 | Share sheet | `Share` API                  | Clipboard (`navigator.clipboard`)                   |
 | Modals      | `<Modal>`                    | Accessible dialogs (Esc, backdrop click, scroll lock) |
 
@@ -58,10 +63,14 @@ discovery loop runs on that frame, in three phases: walk inside the radius and
 hold the reticle on the character for 900 ms to *sight* it; the sighted
 character then stays in view while the key from the previous stop is presented
 in the form docked at the bottom of the frame (a wrong key is rejected and the
-hunt does not advance); the right key makes the character answer in text +
-voice — its message, the key it hands over and the next target's hint appear
-over its head and are read aloud (`utils/speech.ts`, replayable) until the
-player continues. That bubble hangs strictly *above* the character, tail
+hunt does not advance); the right key lets it through,
+and the hand-over appears over its head — the next location's name, the key for it
+and its clue — until the player continues. **The hunt has no voiceover**: nothing
+is read aloud, and a character has no lines of its own, so everything a team
+needs is written on the frame and stays readable while they walk. A cutout video
+character still plays with the sound baked into its own clip, and can be paused
+or replayed from the chip row (both are shown only while a clip is rolling, and
+only for video characters). That bubble hangs strictly *above* the character, tail
 pointing at it: the framing reserves its measured height (the model is kept
 below it, never behind it), and the one case where it cannot fit — a very tall
 hand-off on a very short screen — docks the reveal into the HUD instead of
@@ -123,25 +132,182 @@ hunt key behave identically in the join box:
 Anything else is rejected with the "Game not found" error rather than resolved to
 a different hunt.
 
+## Every publish deals a new order
+
+The order of locations is not fixed by the creator — it is **dealt fresh every
+time the hunt is published**, and that deal is what gets shared, in
+`utils/huntRoute.ts`:
+
+- `dealPublishedRoute` — called once per Publish / Save Changes from
+  `normaliseGame`, and stored on the hunt as `HuntGame.route`. It shuffles with
+  an unbiased Fisher–Yates draw, and the treasure rule is:
+
+  | a location is tagged **"This is the treasure location"** | nothing is tagged |
+  | --- | --- |
+  | it is **held back** and dealt **last**; every other location is shuffled | the **whole list** is shuffled, and the last location of the deal is where that hunt ends |
+
+  So the same hunt published twice hands out two different routes, and the
+  share link, the share code and the exported file all carry the order that
+  publish dealt. Re-publishing mid-round never disturbs a team that is already
+  walking: its order is pinned on join (`HuntProgress.route`).
+- `resolveRoute` — the only place a route becomes stops, and **nothing is
+  rewritten**: each stop is the location the creator authored, with its own
+  coordinates, radius, hint, character, questions and key, in the dealt order
+  with the end last:
+
+  | the team walks | the order came from |
+  | --- | --- |
+  | the order it joined with | pinned on join, so a re-publish never moves a stop under it |
+  | the order this publish dealt | `HuntGame.route` — what the share link and file carry |
+  | the authored order | a hunt saved before routes existed |
+
+  | stop | place | character + questions | opened by |
+  | --- | --- | --- | --- |
+  | dealt stop 1 | stop 1's own pin | stop 1's own | stop 1's key (given at the opening) |
+  | dealt stop 2 | stop 2's own pin | stop 2's own | stop 2's key (given at stop 1's reveal) |
+  | … | … | … | … |
+  | the last dealt stop | its own pin | its own | its key (given at the stop before) |
+
+  | stop | place | character + questions | opened by |
+  | --- | --- | --- | --- |
+  | dealt stop 1 | stop 1's own pin | stop 1's own | stop 1's key (given at the opening) |
+  | dealt stop 2 | stop 2's own pin | stop 2's own | stop 2's key (given at stop 1's reveal) |
+  | … | … | … | … |
+  | the treasure | the treasure's own pin | the treasure's own | its key (given at the stop before) |
+
+So **everything a stop needs belongs to the location** — H (the clue that leads
+there), C (the character that appears there and plays its video), Q (the
+questions asked there) and K (the key that unlocks them). What the dealt order
+changes is only *when* a team gets each package: the hunt opens with their first
+location's H + C + K, and the reveal that ends a stop hands over the next
+location's H + C + K.
+
+**A stop owns its place; the character met on it is the next location's**
+(`characterMetAt`). Standing at a stop, the team walks that location's radius,
+presents that location's key and answers that location's questions — and the
+figure on the pin is the **next** location's character: the one whose own clue
+and key are handed over the moment the gate opens, and whose video plays when
+they are let through. So the hand-over always reads "this character is sending
+you to its own location". The last stop is where that rule runs out: there is
+no next location, only the end of the hunt, so the **End-of-Hunt Character**
+stands there — the team walks the final stretch to the character that is about
+to congratulate them, not to the same figure that just handed over the last
+clue. Traced over the three-location hunt in
+`public/changesProposed/`:
+
+| the team stands at | the gate (this location) | the character met | handed over |
+| --- | --- | --- | --- |
+| Loc2 | key `XJPYV6` + `q_munojni5_22`, `q_munojrn8_42` | **Loc 3** — guardian, video `video-test-transparent`, *"welcome to loc 3"* | *"Hint That Leads Loc 3"* + key `8PDSQZ` |
+| Loc 3 | key `8PDSQZ` + `q_munojni5_23`, `q_munojrn8_43` | **Loc1** — flame, *"welcome to loc 1"* | *"hinnt leads to lead 1"* + key `CC2VE5` |
+| Loc1 (end) | key `CC2VE5` + `q_munojni5_21`, `q_munojrn8_41` | **End-of-Hunt Character** (the creator's pick) | nothing — its clip plays, then *Finish hunt* |
+
+The opening meeting is the one exception: it greets with the **first stop's own**
+character, because that is the location whose H + C + K is being handed over
+before anything is walked.
+
+Discovery, the radar, the AR camera, the key ribbon and the clue line all read
+`activeRoute` from `HuntContext` — never `activeGame.characters`, which stays in
+the creator's authored order. A location the creator adds after a deal still
+gets walked, ahead of the end.
+
+The creator marks the treasure with **"This is the treasure location"** in the
+location editor. A hunt has at most one: publishing keeps the first flagged
+location and clears the others, and the 🎁 Treasure pill sits on that row.
+**The flag is optional** — leave it unticked and the whole list is scrambled,
+so the hunt ends wherever that publish's order finishes. Either way `/creator`
+states which order a publish will deal above the list, and the share sheet shows
+the order that was just dealt (with the end marked), so the ending is never a
+surprise. The end is walked to like any other stop (its own place, character,
+questions and key); clearing it is what shows the congratulations screen.
+
+## The exported file states the order
+
+Every exported hunt (`services/huntFile.ts`) carries an `order` block beside the
+game, so the file reads on its own:
+
+```json
+"order": {
+  "start": "START",
+  "stops": [
+    { "position": 1, "name": "The Old Well", "isEnd": false },
+    { "position": 2, "name": "Riverside Steps", "isEnd": false },
+    { "position": 3, "name": "The Bell Tower", "isEnd": true }
+  ],
+  "summary": "START -> The Old Well -> Riverside Steps -> The Bell Tower (the game must end here)"
+}
+```
+
+It is the order this publish **dealt** — read from `resolveRoute`, the same
+function play uses, so the file and the game cannot disagree — with `isEnd` on
+the last stop. The `order` block itself is descriptive: the order of record is
+`game.route` (and each location's own `order` field), so the importer ignores
+`order` entirely and a hand-edited or stale block cannot desynchronise a hunt.
+Re-importing a file and publishing it deals a new order, because every publish
+does. A round already in progress keeps the order it joined with, so a team can
+briefly be walking an order older than the latest file.
+
+## The end of the hunt
+
+The end of a hunt plays out in two beats. Accepting the **last** key is the
+video beat: the **End-of-Hunt Character** — the roster entry chosen beside the
+**End-of-Hunt Announcement** in Game Details on `/creator`, both required, as
+publishing without them is refused — has been standing on that pin the whole
+walk, held on its first frame, and now plays its clip full-frame with no
+hand-over card over it. *Finish hunt* is the message beat: the camera closes and
+the congratulations screen shows the announcement and the character's name, with
+no second playback — the clip plays once, on the frame, and only there. Hunts
+shared before the end character existed fall back to the treasure location's own
+character, so a round can always finish.
+
+A celebration clip such as `found-hidden-treasure` therefore plays at the last
+find rather than on the page, and the page is the only place the announcement
+text ever appears.
+
+## The opening meeting
+
+When a team joins, the **first location's character appears with them** —
+wherever they are standing, whatever that location's coordinates are. The AR
+camera opens on its own and runs a `meeting` phase (`HuntARCamera`):
+
+- the character is anchored to the **player**, not to its own pin
+  (`meetingAnchor` in `utils/geo.ts`: a fixed 3.2 m due north of the live
+  position), so it is framed dead ahead every time. This is the one moment in a
+  hunt with no creator-authored anchor, and that is the point — the team has not
+  walked there yet, so there is nothing to anchor to;
+- it hands over **its own location's clue and key** (H + K) on screen, exactly
+  like a reveal, and **its video plays** if it is a cutout roster character;
+- no key is presented and **no questions are asked** — the meeting records
+  nothing. The stop is still walked to: inside its radius, its key presented and
+  its questions answered is what completes it.
+
+"Start walking" (or backing out of the camera) ends the meeting; it is shown
+once per round, and reopening the camera before dismissing it greets the team
+again. Everything after it is unchanged: each stop asks its own questions and
+the reveal hands over the next location's clue, character and key, until the
+final stop, whose questions are followed by the End-of-Hunt Character playing
+its clip and *Finish hunt* opening the congratulations screen.
+
 ## Clues and keys stay on screen
 
 Two things the player must never have to remember or hunt for:
 
-- **The first clue.** Character 1 has no earlier character to hand a clue over,
-  so the creator's briefing *is* its clue — and it is readable the moment the
-  hunt opens, on the `/games` active-hunt card and in `HuntPlay`, rather than
-  waiting for the discovery radius. Later stops keep the native strict-visibility
-  rule: outside the radius the character's name and hint stay hidden and the
-  player navigates from the previous character's dialogue.
-- **The key in hand.** Character N's key is handed over by character N-1 (the
-  creator gives players the first one) and has to be presented at the next stop.
-  It used to exist only inside the reveal bubble, which disappears as soon as the
-  player walks on. `components/KeyInHand.tsx` pins it to the screen instead: the
-  ribbon under the hunt progress bar (labelled *Key from the creator* for the
-  first stop, *Latest key received* afterwards), the active-hunt card on
-  `/games`, and a chip on the AR frame in every phase (hunting, key entry,
-  reveal) — so it is still readable while typing it into the form. Tapping the
-  ribbon or the chip copies the key, so it can be pasted into the field.
+- **The clue ahead.** The team is always holding the clue for the stop they are
+  walking to: it arrives with the opening meeting (first stop) or with the
+  reveal at the stop before it, so it is readable the moment it is given — on
+  the meeting's own panel, on the `/games` active-hunt card and in `HuntPlay` —
+  rather than waiting for a discovery radius. Distance and bearing stay behind
+  the explicit location check until the player is inside the discovery zone, and
+  locations beyond the team's next stay anonymous in the route list, so strict
+  visibility on *proximity* is unchanged.
+- **The key in hand.** A location's key opens that location, and it arrives one
+  stop early — so what is on screen is always the key for the walk ahead.
+  `components/KeyInHand.tsx` pins it to the screen: the ribbon under the hunt
+  progress bar (labelled *Your first key — opens your first location* while
+  nothing has been discovered, *Latest key received* afterwards), the
+  active-hunt card on `/games`, and a chip on the AR frame in every phase
+  (hunting, key entry, reveal) — so it is still readable while typing it into
+  the form. Tapping the ribbon or the chip copies the key, so it can be pasted
+  into the field.
 
 ## Geolocation requires HTTPS
 

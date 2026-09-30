@@ -1,3 +1,4 @@
+import { resolveRoute } from '../utils/huntRoute';
 import type {
   HuntCharacter,
   HuntCharacterType,
@@ -16,14 +17,25 @@ import type {
  * between devices with no backend.
  *
  * The file wraps the game in a small self-describing envelope
- * (`{ format, version, exportedAt, game }`) so future schema changes can be
- * detected, while the parser also accepts a bare `HuntGame` (the exact shape
+ * (`{ format, version, exportedAt, order, game }`) so future schema changes can
+ * be detected, while the parser also accepts a bare `HuntGame` (the exact shape
  * the share-code payload uses) so hand-written files work too.
  *
- * Only manifest IDs travel (`characterAssetId`, `sponsorBannerId`) — never
- * asset URLs — matching the hunt format itself, so an imported hunt cannot
- * inject remote resources and simply falls back to the procedural character
- * when a manifest entry is missing on the importing device.
+ * `order` is the hunt's authored order written out for a human — the location
+ * names from `START` through to the stop the game must end on (see
+ * `buildHuntOrder`). It is derived from `game.characters`, so the parser
+ * ignores it: the order of record is the locations' own `order` field, and a
+ * stale or hand-edited `order` in a file cannot desynchronise the hunt.
+ *
+ * A location travels complete: its place, hint, character, questions and key are
+ * all its own. The only game-level additions are the end-of-hunt announcement
+ * and the character shown with it (`endCharacterAssetId`).
+ *
+ * Only manifest IDs travel (`characterAssetId`, `sponsorBannerId`,
+ * `endCharacterAssetId`) — never asset URLs — matching the hunt format itself,
+ * so an imported hunt cannot inject remote resources and simply falls back to
+ * the procedural character when a manifest entry is missing on the importing
+ * device.
  */
 
 /** Marker written into every exported file. */
@@ -44,12 +56,74 @@ const HUNT_CHARACTER_TYPES: readonly HuntCharacterType[] = [
 const DEFAULT_RADIUS_METERS = 25;
 const DEFAULT_ALTITUDE_METERS = 0;
 
+/** One stop in the exported order. */
+export interface HuntExportOrderStop {
+  /** 1-based position in the hunt's order; the last stop is the end. */
+  position: number;
+  /** The location's name, as the creator wrote it. */
+  name: string;
+  /** True for the stop the game must end on (the treasure location). */
+  isEnd: boolean;
+}
+
+/**
+ * The hunt's order, written beside the game so the file reads on its own: where
+ * a team starts, which location they walk next, and where the game ends. Purely
+ * descriptive — the game itself carries the locations, and each team is still
+ * dealt its own order of them when they join (see `utils/huntRoute`).
+ */
+export interface HuntExportOrder {
+  /** Where the hunt starts: always `START`, since no stop is a fixed opener. */
+  start: string;
+  /** The location names in order; the last entry is where the game ends. */
+  stops: HuntExportOrderStop[];
+  /**
+   * The same order as one line — `START -> The Old Well -> Riverside Steps ->
+   * The Bell Tower (the game must end here)` — so someone skimming the file can
+   * read the route without expanding the JSON.
+   */
+  summary: string;
+}
+
 /** Envelope written around the game in exported files. */
 export interface HuntExportFile {
   format: typeof HUNT_EXPORT_FORMAT;
   version: number;
   exportedAt: string;
+  /** The hunt's order, start to end (see {@link HuntExportOrder}). */
+  order: HuntExportOrder;
   game: HuntGame;
+}
+
+/**
+ * Builds the exported order from a game's locations.
+ *
+ * This is the order teams are handed, read from `resolveRoute` so the file
+ * cannot disagree with play: the order the publish dealt (`game.route` — a fresh
+ * shuffle on every Publish / Save Changes), or the authored order for a hunt
+ * saved before routes existed. The treasure, when one is tagged, closes the
+ * order; when none is, the last location the deal produced is where the hunt
+ * ends.
+ *
+ * It is still the *published* order rather than any one team's route: a round
+ * already in progress keeps the order it joined with (`HuntProgress.route`), so
+ * a later re-publish can leave a team walking an older order than this file
+ * describes.
+ */
+export function buildHuntOrder(game: Pick<HuntGame, 'characters' | 'route'>): HuntExportOrder {
+  const stops: HuntExportOrderStop[] = resolveRoute(game, null).map(
+    (character, index, all) => ({
+      position: index + 1,
+      name: character.name,
+      isEnd: index === all.length - 1,
+    })
+  );
+  const names = stops.map(stop => stop.name);
+  const summary =
+    names.length === 0
+      ? 'START -> (no locations)'
+      : `START -> ${names.join(' -> ')} (the game must end here)`;
+  return { start: 'START', stops, summary };
 }
 
 /**
@@ -65,6 +139,7 @@ export function buildHuntExport(game: HuntGame): HuntExportFile {
     format: HUNT_EXPORT_FORMAT,
     version: HUNT_EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
+    order: buildHuntOrder(game),
     game,
   };
 }
@@ -189,7 +264,7 @@ function normaliseImportedQuestions(raw: unknown): HuntQuestion[] | undefined {
  * sensibly guess.
  */
 function normaliseImportedCharacter(raw: unknown, index: number): HuntCharacter {
-  const position = `Character ${index + 1}`;
+  const position = `Location ${index + 1}`;
   if (!isRecord(raw)) {
     throw new Error(`${position} in this file isn't a valid entry.`);
   }
@@ -228,8 +303,15 @@ function normaliseImportedCharacter(raw: unknown, index: number): HuntCharacter 
     characterAssetId: text(raw.characterAssetId).trim() || undefined,
     sponsorBannerId: text(raw.sponsorBannerId).trim() || null,
     hint: text(raw.hint),
-    dialogue: text(raw.dialogue),
     key: text(raw.key).trim() || undefined,
+    // Strict boolean: a hand-written file only marks the treasure when the value
+    // is literally true. The legacy `isCongratulations` name is still accepted
+    // (files written before the model was re-framed around locations) but only
+    // `isTreasure` is ever written back. Duplicate flags survive import but are
+    // reduced to the first one when the hunt is next published (`normaliseGame`).
+    ...(raw.isTreasure === true || raw.isCongratulations === true
+      ? { isTreasure: true }
+      : {}),
     // Present only when at least one usable question survived validation —
     // `undefined` would serialise away anyway, but keeping the key absent
     // keeps hand-inspected files clean too.
@@ -270,7 +352,7 @@ export function parseHuntGameJson(input: string): ImportedHunt {
     throw new Error(`This file doesn't contain a hunt.`);
   }
   if (!Array.isArray(payload.characters)) {
-    throw new Error('This file has no character route.');
+    throw new Error('This file has no locations.');
   }
   const title = text(payload.title).trim();
   if (!title) {
@@ -285,6 +367,10 @@ export function parseHuntGameJson(input: string): ImportedHunt {
     createdAt: timestamp(payload.createdAt),
     updatedAt: timestamp(payload.updatedAt),
     endAnnouncement: text(payload.endAnnouncement).trim(),
+    // The character shown with the announcement. Imported with the hunt so
+    // reopening a file does not force the creator to pick it again before
+    // publishing.
+    endCharacterAssetId: text(payload.endCharacterAssetId).trim() || null,
     characters: payload.characters.map(normaliseImportedCharacter),
   };
 }

@@ -12,11 +12,25 @@ selected model, transparent photo, or cutout video through the hunt camera.
   PNG/WebP. JPEG is supported for ordinary rectangular images but cannot have a
   transparent background.
 - **Cutout video:** one VP9 `.webm` exported **with an alpha channel**
-  (transparent background — e.g. `yuva420p`, not `yuv420p`). The clip is muted
-  and looped in the camera; any bundled audio track never plays. iOS Safari
+  (transparent background — e.g. `yuva420p`, not `yuv420p`; an alpha-less clip
+  plays as an opaque rectangle over the camera feed). The clip is looped in the
+  camera and its own audio track plays after the key is accepted, so a video
+  character carries its own soundtrack and gets no spoken voiceover. iOS Safari
   cannot play VP9 alpha, so a video entry may name an HEVC-with-alpha
   `.mov`/`.mp4` twin in `fallbackSrc` for iPhones. Set `aspectRatio` to the
   full frame width divided by height (e.g. `0.5625` for 720×1280).
+
+  Verify a new clip actually carries alpha before adding it — ffmpeg's *native*
+  VP9 decoder silently drops the alpha plane, so decode with the libvpx decoder
+  when checking:
+
+  ```bash
+  ffmpeg -v error -c:v libvpx-vp9 -i clip.webm -frames:v 1 -pix_fmt rgba -f rawvideo frame.rgba
+  # every fourth byte is alpha: 0 in the background, 255 on the subject
+  ```
+
+  `~/Documents/scripts/make_ar.py` (MediaPipe selfie segmentation → VP9
+  `yuva420p`) is the pipeline these clips were made with.
 
 Keep models mobile-friendly (preferably under 8 MB, 5,000–30,000 triangles).
 The app automatically centres every model horizontally, puts its lowest point

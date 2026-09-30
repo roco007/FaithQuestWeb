@@ -155,9 +155,9 @@ function pickVideoSource(asset: CharacterAsset, video: HTMLVideoElement): string
  * The clip starts paused on its first frame and stays there until the AR
  * layer calls `play()` — the camera holds the frozen frame while hunting and
  * during key entry, then plays once with the reveal and holds its final frame
- * (nothing loops; only the reveal's Replay rewinds it). It plays with sound:
- * a video character is its own voice, so its bundled audio track stands in
- * for the hunt's TTS voiceover (which stays silent for it). If the browser
+ * (nothing loops; only the Replay button rewinds it). It plays with the sound
+ * baked into the clip — the hunt itself has no voiceover, so the clip's own
+ * audio is all the sound a video character makes. If the browser
  * blocks playback with audio, the attempt falls back to silent so the
  * animation still rolls; the next play/restart retries with audio.
  */

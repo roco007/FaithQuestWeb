@@ -50,7 +50,7 @@ function levenshtein(a: string, b: string): number {
   if (!a.length) return b.length;
   if (!b.length) return a.length;
   // Two rolling rows: O(m·n) time, O(n) space. Answers are short, so this is
-  // negligible next to the haptic/speech it gates.
+  // negligible next to the haptics it gates.
   let prev: number[] = Array.from({ length: b.length + 1 }, (_, i) => i);
   let curr: number[] = new Array(b.length + 1);
   for (let i = 1; i <= a.length; i++) {
