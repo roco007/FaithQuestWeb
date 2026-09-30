@@ -60,15 +60,14 @@ interface ARSceneViewProps {
   renderActive: boolean;
   /**
    * Whether media assets (cutout videos) may play. False while hunting or
-   * entering the key, so the clip holds its first frame; true once the key
-   * is accepted — while the voiceover speaks, or for the whole reveal when
-   * the clip carries its own audio.
+   * entering the key, so the clip holds its first frame; true through the
+   * meeting greeting and once the key is accepted at a reveal.
    */
   mediaPlaying?: boolean;
   /**
-   * Bumped every time the voiceover — or a video character's own audio — is
-   * (re)started so a cutout video restarts from frame 1 in sync with what the
-   * character says. Ignored unless `mediaPlaying` is true.
+   * Bumped every time a character's clip is (re)started — a meeting greeting, a
+   * reveal, or a replay — so a cutout video restarts from frame 1. Ignored
+   * unless `mediaPlaying` is true.
    */
   mediaRestartToken?: number;
   /**
@@ -76,7 +75,7 @@ interface ARSceneViewProps {
    * it while hunting, or what it says once its key has been accepted.
    */
   hint?: string | null;
-  /** Who is speaking, shown as the bubble's header. */
+  /** Whose bubble this is, shown as its header (a caption, not audio). */
   speaker?: string | null;
   /**
    * Full header override, used once the character stops hinting at the player
@@ -236,10 +235,9 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
   }, [sceneReady, characterType, characterAsset]);
 
   // Gate cutout-video playback on the reveal: paused on frame 1 while hunting
-  // or entering the key, rolling only while the reveal voice speaks (or for the
-  // whole reveal when the clip is its own voice — it plays once and holds its
-  // final frame), frozen when it ends. A restart token rewinds the clip so a
-  // replay restarts it from the top in sync.
+  // or entering the key, rolling through the meeting greeting and the reveal (it
+  // plays once and holds its final frame), frozen when it ends. A restart token
+  // rewinds the clip so a replay restarts it from the top.
   useEffect(() => {
     const current = characterRef.current;
     if (!current) return;
@@ -562,8 +560,8 @@ export const ARSceneView: React.FC<ARSceneViewProps> = ({
     // least 8px from the top — the same clamps the head bubble uses.
     const maxBottom = Math.max(viewport.height - 8 - cardHeight, 12);
     const bottom = clamp(viewport.height - anchor.headYPx + AR_CARD_GAP, 12, maxBottom);
-    // Pre-key the card is the banner alone; the hint/reveal rows join under it
-    // only once the character actually speaks (the reveal).
+    // Pre-key the card is the banner alone; the clue/reveal rows join under it
+    // from the meeting and the reveal onwards.
     const combined = Boolean(hint) || Boolean(bubbleExtra);
 
     sponsorCard = (

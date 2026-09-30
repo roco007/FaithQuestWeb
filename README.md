@@ -51,7 +51,6 @@ npm test
 | Persistence | `AsyncStorage`               | `localStorage` (`utils/webStorage.ts`)              |
 | Haptics     | `expo-haptics`               | `navigator.vibrate` (progressive enhancement)       |
 | Audio cues  | Native sound pack            | Web Audio API synthesized tones                     |
-| Voice clues | Native TTS                   | `speechSynthesis`                                   |
 | Share sheet | `Share` API                  | Clipboard (`navigator.clipboard`)                   |
 | Modals      | `<Modal>`                    | Accessible dialogs (Esc, backdrop click, scroll lock) |
 
@@ -66,10 +65,12 @@ character then stays in view while the key from the previous stop is presented
 in the form docked at the bottom of the frame (a wrong key is rejected and the
 hunt does not advance); the right key lets it through,
 and the hand-over appears over its head — the next location's name, the key for it
-and its clue — read aloud (`utils/speech.ts`, replayable) until the player
-continues. There is no scripted speech: a character has no lines of its own, so
-the only thing said at a find is that hand-over (the end-of-hunt announcement on
-the last one). That bubble hangs strictly *above* the character, tail
+and its clue — until the player continues. **The hunt has no voiceover**: nothing
+is read aloud, and a character has no lines of its own, so everything a team
+needs is written on the frame and stays readable while they walk. A cutout video
+character still plays with the sound baked into its own clip, and can be paused
+or replayed from the chip row (both are shown only while a clip is rolling, and
+only for video characters). That bubble hangs strictly *above* the character, tail
 pointing at it: the framing reserves its measured height (the model is kept
 below it, never behind it), and the one case where it cannot fit — a very tall
 hand-off on a very short screen — docks the reveal into the HUD instead of

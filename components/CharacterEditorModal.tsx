@@ -515,7 +515,7 @@ export function CharacterEditorModal({
         )}
         <p className="fieldHelp">
           The character that appears at this location and plays its video: it is pinned here,
-          seen through the player&apos;s camera on arrival, and speaks once the key is accepted
+          seen through the player&apos;s camera on arrival, and is revealed once the key is accepted
           and the questions below are answered. Its built-in style is used for the map glyph and
           as a fallback.
         </p>
@@ -619,7 +619,7 @@ export function CharacterEditorModal({
           <ListChecks size={12} /> Questions Asked Here (optional)
         </span>
         <p className="fieldHelp">
-          Asked once the player presents this location's key and before its character speaks and
+          Asked once the player presents this location's key and before its character is revealed,
           plays its video — every question must be answered correctly to clear the location (and,
           on the treasure, to end the hunt). Leave this empty to let the key alone open the
           character.

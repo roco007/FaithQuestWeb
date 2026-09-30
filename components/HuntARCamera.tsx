@@ -13,7 +13,7 @@ import {
   Camera,
   KeyRound,
   Sparkles,
-  Volume2,
+  RotateCcw,
   ListChecks,
   Pause,
   Play,
@@ -46,7 +46,6 @@ import { KeyInHand } from './KeyInHand';
 import { LocationStatus } from './LocationStatus';
 import { formatDistance, meetingAnchor } from '../utils/geo';
 import { triggerHaptic, playSoundEffect } from '../utils/sound';
-import { speakClue, stopSpeaking } from '../utils/speech';
 import { isQuestionCorrect } from '../utils/huntQuestions';
 
 /** Milliseconds the player must hold aim + range before the character is sighted. */
@@ -94,7 +93,7 @@ interface HuntARCameraProps {
   /**
    * The character standing at the current stop's pin — the **next** location's
    * character, supplied by `HuntContext` (see `characterMetAt`). It is what the
-   * frame renders and what speaks: its name, model and video. The stop
+   * frame renders: its name, model and video. The stop
    * itself (the pin, radius, clue, key and questions) stays on `currentCharacter`
    * inside this component.
    */
@@ -115,56 +114,20 @@ type CameraState = 'starting' | 'active' | 'error';
  *                 reveals, and the discovery is recorded only once they pass;
  *  - `reveal`:    the key was presented and any question gate passed: the
  *                 character's message and video, then the hand-over of the NEXT
- *                 location's clue, character and key (text + voice) until the
+ *                 location's clue, character and key on screen until the
  *                 player continues. On the treasure there is no hand-over — the
  *                 congratulations await instead.
  */
 type ARPhase = 'meeting' | 'hunting' | 'key' | 'quiz' | 'reveal';
 
-/** Spells a key out for the voice clue ("K7M2QX" → "K 7 M 2 Q X"). */
-function spellKey(key: string): string {
-  return key
-    .split('')
-    .map(ch => (ch === '-' ? 'dash' : ch))
-    .join(' ');
-}
-
 /**
- * What is read aloud once the right key is presented: the hand-over — the next
- * location's name, its key and its clue — or, on the final find, the
- * end-of-hunt announcement. Read out rather than left on screen, so a team
- * walking on never has to stare at the frame to catch the next key.
+ * The hand-over — the next location's name, its key and its clue, or the
+ * end-of-hunt announcement on the last find — is **on screen only**. The hunt
+ * has no voiceover: nothing is read aloud, so everything a team needs is
+ * written on the frame and stays readable while they walk on.
  */
-function buildSpeech(result: DiscoverResult): string {
-  if (result.isFinal) {
-    return result.game.endAnnouncement;
-  }
-  return [
-    result.nextCharacter?.name ? `Your next location: ${result.nextCharacter.name}.` : '',
-    result.nextCharacter?.key ? `Your next key is ${spellKey(result.nextCharacter.key)}.` : '',
-    result.nextCharacter?.hint ? `Your next clue: ${result.nextCharacter.hint}` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-}
-
 /**
- * What the character says when it meets the team at the start of the round: the
- * same voice hand-over as a reveal, pointed at the location the team is about to
- * walk to — its clue and its key — so the meeting really is the opening
- * hand-over of the hunt, spoken wherever the team happens to be standing.
- */
-function buildMeetingSpeech(character: HuntCharacter): string {
-  return [
-    character.key ? `Your key for ${character.name} is ${spellKey(character.key)}.` : '',
-    character.hint ? `Your clue: ${character.hint}` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-}
-
-/**
- * The character's hand-off, shown inside the speech bubble over its head (and
+ * The character's hand-off, shown inside the bubble over its head (and
  * docked into the bottom HUD when WebGL cannot draw the character at all).
  */
 function RevealDetails({ result }: { result: DiscoverResult }) {
@@ -208,7 +171,7 @@ function RevealDetails({ result }: { result: DiscoverResult }) {
  * reticle on the character while inside its radius, present this location's key
  * in the docked form — handed over one stop early, so the team already holds it
  * — pass the location's reveal questions when it has any, and only then the
- * character answers in text + voice with the hand-over for the stop ahead:
+ * character answers with the hand-over for the stop ahead, on screen:
  * the next location's clue, character and key. Only a matching key and a passed
  * question gate advance the hunt — until then the character simply stays in
  * view. On the treasure there is no hand-over: the congratulations wait instead.
@@ -252,7 +215,7 @@ export function HuntARCamera({
   const [quizError, setQuizError] = useState<string | null>(null);
   /** True while the final pass is being recorded (discovery in flight). */
   const [quizChecking, setQuizChecking] = useState(false);
-  /** Set once the right key is presented — drives the speech over the head. */
+  /** Set once the right key is presented — drives the hand-over card. */
   const [reveal, setReveal] = useState<DiscoverResult | null>(null);
   /**
    * The player paused a video character's clip on the frame. Gating `mediaPlaying`
@@ -263,10 +226,8 @@ export function HuntARCamera({
   const [videoPaused, setVideoPaused] = useState(false);
   /** Deployment-owned roster resolved from the selected character's asset ID. */
   const [characterAssets, setCharacterAssets] = useState<CharacterAsset[]>([]);
-  /** True while the reveal is being read aloud (drives the replay button). */
-  const [speaking, setSpeaking] = useState(false);
-  /** Bumped each time the reveal voiceover (re)starts, to cue media assets. */
-  const [voiceCue, setVoiceCue] = useState(0);
+  /** Bumped each time a character's clip (re)starts, to cue media assets. */
+  const [mediaCue, setMediaCue] = useState(0);
   /**
    * Height of the on-screen keyboard covering the docked key form. Mobile
    * browsers shrink the *visual* viewport without resizing the layout one, so
@@ -347,23 +308,18 @@ export function HuntARCamera({
       characterAssets.find(asset => asset.id === activeCharacter?.characterAssetId) ?? null,
     [activeCharacter?.characterAssetId, characterAssets]
   );
+  /** True for a cutout roster character — the only kind that plays a clip. */
+  const isVideoCharacter = characterAsset?.kind === 'video';
   /**
-   * A cutout-video roster character speaks through its own clip: it carries the
-   * reveal audio, so the TTS voiceover stands down and the video's track plays
-   * instead.
+   * Pause and replay only exist where a clip is actually rolling: the meeting
+   * greeting and a reveal. While hunting a cutout is held on frame 1, so there
+   * would be nothing to pause or replay.
    */
-  const videoCharacterVoice = characterAsset?.kind === 'video';
-  /**
-   * The pause control only appears where a clip is playing: the meeting greeting
-   * and a reveal, both of which roll the character's own video. While hunting a
-   * cutout is held on frame 1, so there would be nothing to pause.
-   */
-  const canPauseVideo =
-    videoCharacterVoice && (phase === 'meeting' || phase === 'reveal');
+  const canPauseVideo = isVideoCharacter && (phase === 'meeting' || phase === 'reveal');
 
   /**
-   * Who the reveal is credited to in the speech bubble. A location's name is the
-   * *place*, so it captions the bubble rather than speaking for it: the roster
+   * Who the reveal is credited to in the bubble. A location's name is the
+   * *place*, so it captions the bubble rather than standing in for it: the roster
    * entry's own name is used whenever the character has one, and the location
    * name is only the fallback.
    */
@@ -613,7 +569,7 @@ export function HuntARCamera({
 
   // Open/close lifecycle: reset the discovery loop, ask iOS for motion
   // permission (must happen inside the opening gesture's transient activation
-  // window), start the feed, and always release camera + voice on the way out.
+  // window), start the feed, and always release the camera on the way out.
   useEffect(() => {
     if (!open) return;
     sightedRef.current = false;
@@ -632,14 +588,12 @@ export function HuntARCamera({
     setQuizText('');
     setQuizError(null);
     setQuizChecking(false);
-    setSpeaking(false);
-    setVoiceCue(0);
+    setMediaCue(0);
     setVideoPaused(false);
     void orientation.requestOrientationPermission();
     void startCamera();
     return () => {
       stopCamera();
-      stopSpeaking();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -733,23 +687,16 @@ export function HuntARCamera({
   }, [canLock, handleSighted]);
 
   /**
-   * The opening meeting: greets the team on the frame, speaks its hand-over and
+   * The opening meeting: greets the team on the frame, shows its hand-over and
    * unlocks its video, but records nothing — the stop is still walked to.
    */
-  const beginMeeting = useCallback(
-    (character: HuntCharacter) => {
-      setReveal(null);
-      setVideoPaused(false);
-      setPhase('meeting');
-      triggerHaptic('success');
-      setVoiceCue(cue => cue + 1);
-      if (!videoCharacterVoice) {
-        setSpeaking(true);
-        void speakClue(buildMeetingSpeech(character), { onDone: () => setSpeaking(false) });
-      }
-    },
-    [videoCharacterVoice]
-  );
+  const beginMeeting = useCallback(() => {
+    setReveal(null);
+    setVideoPaused(false);
+    setPhase('meeting');
+    triggerHaptic('success');
+    setMediaCue(cue => cue + 1);
+  }, []);
 
   // Greet once per meeting: the latch clears whenever the meeting is not running,
   // so reopening the camera before dismissing it greets the team again.
@@ -761,7 +708,7 @@ export function HuntARCamera({
     }
     if (meetingGreetedRef.current) return;
     meetingGreetedRef.current = true;
-    beginMeeting(meetingCharacter);
+    beginMeeting();
   }, [open, phase, meetingCharacter, beginMeeting]);
 
   /**
@@ -787,10 +734,8 @@ export function HuntARCamera({
 
   /**
    * The single path into `reveal`: records nothing itself (the context call
-   * that produced `result` already did) and starts the hand-over's voice
-   * — unless the character is a cutout video with its own audio, which rolls
-   * with its own sound instead. The voice cue starts a cutout video from
-   * frame 1 either way.
+   * that produced `result` already did) and shows the hand-over card. The media
+   * cue starts a cutout video from frame 1.
    */
   const beginReveal = useCallback(
     (result: DiscoverResult) => {
@@ -801,13 +746,9 @@ export function HuntARCamera({
       setPhase('reveal');
       triggerHaptic('success');
       playSoundEffect(result.isFinal ? 'level_up' : 'correct');
-      setVoiceCue(cue => cue + 1);
-      if (!videoCharacterVoice) {
-        setSpeaking(true);
-        void speakClue(buildSpeech(result), { onDone: () => setSpeaking(false) });
-      }
+      setMediaCue(cue => cue + 1);
     },
-    [videoCharacterVoice]
+    []
   );
 
   /**
@@ -904,7 +845,7 @@ export function HuntARCamera({
         playSoundEffect('wrong');
         return;
       }
-      beginReveal(result); // brings its own success sound and voice cue
+      beginReveal(result); // brings its own success sound and media cue
     } catch (err) {
       // The key was checked when the quiz opened; this covers the hunt having
       // moved underneath us (e.g. the character discovered elsewhere).
@@ -927,34 +868,17 @@ export function HuntARCamera({
     beginReveal,
   ]);
 
-  /** Re-reads the character's message aloud (the native "replay voice clue"). */
-  const handleReplayVoice = useCallback(() => {
-    if (!reveal) return;
-    // Restart the cutout video from frame 1 so it stays in sync with the voice.
-    // Replaying also lifts a pause, since the rewind only runs while playing.
-    setVideoPaused(false);
-    setVoiceCue(cue => cue + 1);
-    // A video character replays its own audio — no TTS voiceover on top.
-    if (videoCharacterVoice) return;
-    setSpeaking(true);
-    void speakClue(buildSpeech(reveal), { onDone: () => setSpeaking(false) });
-  }, [reveal, videoCharacterVoice]);
-
   /**
-   * Re-reads the meeting hand-over aloud — the first location's key and clue —
-   * for anyone who did not catch it the first time. Same rule as the reveal's
-   * replay: restart the cutout video from frame 1 so it stays in step with the
-   * voice, and let a video character speak for itself rather than stacking TTS
-   * on top of its own audio.
+   * Replays a video character from frame 1 — the only thing there is to replay
+   * now that nothing is read aloud. Lifting a pause matters: the rewind only
+   * runs while the clip is playing, so a replay while paused would do nothing
+   * visible. A character with no video has no replay at all
+   * (`canReplayVideo`); its hand-over is on screen to read.
    */
-  const handleReplayMeeting = useCallback(() => {
-    if (!meetingCharacter) return;
+  const handleReplayVideo = useCallback(() => {
     setVideoPaused(false);
-    setVoiceCue(cue => cue + 1);
-    if (videoCharacterVoice) return;
-    setSpeaking(true);
-    void speakClue(buildMeetingSpeech(meetingCharacter), { onDone: () => setSpeaking(false) });
-  }, [meetingCharacter, videoCharacterVoice]);
+    setMediaCue(cue => cue + 1);
+  }, []);
 
   /**
    * Dismisses the reveal. A non-final discovery re-arms the frame for the next
@@ -963,9 +887,8 @@ export function HuntARCamera({
    */
   const handleRevealContinue = useCallback(() => {
     if (!reveal) return;
-    stopSpeaking();
-    setSpeaking(false);
-    setVoiceCue(0);
+    setVideoPaused(false);
+    setMediaCue(0);
     onDiscoveryComplete?.(reveal);
     if (reveal.isFinal) return;
     setReveal(null);
@@ -1076,26 +999,16 @@ export function HuntARCamera({
           characterAsset={characterAsset}
           frame={canvasFrame}
           renderActive={true}
-          // Cutout videos hold frame 1 until the key is accepted; during the
-          // reveal they roll while the voiceover speaks (freeze on end, restart
-          // from frame 1 on replay) — or for the whole reveal when the clip is
-          // its own voice, or when no TTS engine exists to sync to.
+          // Cutout videos hold frame 1 until the key is accepted; through the
+          // meeting greeting and the reveal they roll (freeze on end, restart
+          // from frame 1 on a replay).
           mediaPlaying={
-            (phase === 'reveal' || phase === 'meeting') &&
-            !videoPaused &&
-            (videoCharacterVoice ||
-              speaking ||
-              typeof window === 'undefined' ||
-              !('speechSynthesis' in window))
+            (phase === 'reveal' || phase === 'meeting') && !videoPaused
           }
-          mediaRestartToken={voiceCue}
+          mediaRestartToken={mediaCue}
           hint={bubbleText}
           speaker={showHeadHint ? stopCharacter?.name ?? null : null}
-          label={
-            reveal
-              ? `${revealSpeaker ?? 'They'}${speaking ? ' — SPEAKING…' : ''}`
-              : null
-          }
+          label={reveal ? (revealSpeaker ?? 'They') : null}
           bubbleExtra={reveal ? <RevealDetails result={reveal} /> : null}
           accent={characterMeta?.accent}
           sponsorBanner={sponsorBanner}
@@ -1263,14 +1176,16 @@ export function HuntARCamera({
               </div>
             )}
             <div className="arRevealActions" style={{ marginTop: 10 }}>
-              <button
-                type="button"
-                className="arRevealBtn arRevealReplay"
-                onClick={handleReplayMeeting}
-              >
-                <Volume2 size={15} />
-                {speaking ? 'Speaking…' : 'Replay message'}
-              </button>
+              {canPauseVideo && (
+                <button
+                  type="button"
+                  className="arRevealBtn arRevealReplay"
+                  onClick={handleReplayVideo}
+                >
+                  <RotateCcw size={15} />
+                  Replay video
+                </button>
+              )}
               <button
                 type="button"
                 className="arRevealBtn arRevealContinue"
@@ -1422,21 +1337,22 @@ export function HuntARCamera({
                   <span className="arBubbleDot" style={{ background: characterMeta?.accent }} />
                   <span className="arBubbleSpeaker" style={{ color: characterMeta?.accent }}>
                     {revealSpeaker ?? 'They'}
-                    {speaking ? ' — SPEAKING…' : ''}
                   </span>
                 </div>
                 <RevealDetails result={reveal} />
               </div>
             )}
             <div className="arRevealActions">
-              <button
-                type="button"
-                className="arRevealBtn arRevealReplay"
-                onClick={handleReplayVoice}
-              >
-                <Volume2 size={15} />
-                {speaking ? 'Speaking…' : 'Replay message'}
-              </button>
+              {canPauseVideo && (
+                <button
+                  type="button"
+                  className="arRevealBtn arRevealReplay"
+                  onClick={handleReplayVideo}
+                >
+                  <RotateCcw size={15} />
+                  Replay video
+                </button>
+              )}
               <button
                 type="button"
                 className="arRevealBtn arRevealContinue"

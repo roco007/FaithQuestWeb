@@ -30,7 +30,7 @@ import {
 export interface DiscoverResult {
   /**
    * The character the team met at the stop they just cleared — the *next*
-   * location's character, which is what speaks, plays its video and hands over
+   * location's character, which is what plays its video and hands over
    * the clue. The stop itself (its key, questions and place) is the entry
    * before it in the route.
    */
@@ -371,7 +371,7 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return {
         // The character they met, not the stop they walked to: that is the one
-        // that speaks, plays its video and hands over the next clue. At the last
+        // that plays its video and hands over the next clue. At the last
         // stop `nextUp` is null, so it is the stop's own character.
         character: characterMetAt(activeRoute, nextCharacter.id) ?? nextCharacter,
         isFinal: isComplete,

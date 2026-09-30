@@ -22,9 +22,8 @@ export interface ARCharacterInstance {
   /**
    * Optional media controls for assets with their own timeline (cutout
    * videos). Called by the AR layer to hold frame 1 until the reveal, then
-   * roll during it — alongside the voiceover, or with the clip's own audio
-   * when the video is the character's voice. No-op for procedural/GLB/photo
-   * assets.
+   * roll through the meeting greeting and the reveal. No-op for
+   * procedural/GLB/photo assets.
    */
   play?: () => void;
   pause?: () => void;
