@@ -179,6 +179,26 @@ changes is only *when* a team gets each package: the hunt opens with their first
 location's H + C + K, and the reveal that ends a stop hands over the next
 location's H + C + K.
 
+**A stop owns its place; the character met on it is the next location's**
+(`characterMetAt`). Standing at a stop, the team walks that location's radius,
+presents that location's key and answers that location's questions — and the
+figure on the pin is the **next** location's character: the one whose own clue
+and key are handed over the moment the gate opens, and whose video plays when
+they are let through. So the hand-over always reads "this character is sending
+you to its own location". The last stop has no next location, so its own
+character stands there. Traced over the three-location hunt in
+`public/changesProposed/`:
+
+| the team stands at | the gate (this location) | the character met | handed over |
+| --- | --- | --- | --- |
+| Loc2 | key `XJPYV6` + `q_munojni5_22`, `q_munojrn8_42` | **Loc 3** — guardian, video `video-test-transparent`, *"welcome to loc 3"* | *"Hint That Leads Loc 3"* + key `8PDSQZ` |
+| Loc 3 | key `8PDSQZ` + `q_munojni5_23`, `q_munojrn8_43` | **Loc1** — flame, *"welcome to loc 1"* | *"hinnt leads to lead 1"* + key `CC2VE5` |
+| Loc1 (end) | key `CC2VE5` + `q_munojni5_21`, `q_munojrn8_41` | Loc1's own flame | congratulations — End-of-Hunt Character |
+
+The opening meeting is the one exception: it greets with the **first stop's own**
+character, because that is the location whose H + C + K is being handed over
+before anything is walked.
+
 Discovery, the radar, the AR camera, the key ribbon and the clue line all read
 `activeRoute` from `HuntContext` — never `activeGame.characters`, which stays in
 the creator's authored order. A location the creator adds after a deal still

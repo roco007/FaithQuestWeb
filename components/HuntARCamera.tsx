@@ -89,6 +89,14 @@ interface HuntARCameraProps {
   meetingCharacter?: HuntCharacter | null;
   /** The player dismissed the opening meeting and is ready to walk. */
   onMeetingComplete?: () => void;
+  /**
+   * The character standing at the current stop's pin — the **next** location's
+   * character, supplied by `HuntContext` (see `characterMetAt`). It is what the
+   * frame renders and what speaks: its name, model, video, dialogue. The stop
+   * itself (the pin, radius, clue, key and questions) stays on `currentCharacter`
+   * inside this component.
+   */
+  metCharacter?: HuntCharacter | null;
 }
 
 type CameraState = 'starting' | 'active' | 'error';
@@ -212,6 +220,7 @@ export function HuntARCamera({
   onDiscoveryComplete,
   meetingCharacter = null,
   onMeetingComplete,
+  metCharacter = null,
 }: HuntARCameraProps) {
   const { currentCharacter, discoverCurrentCharacter } = useHunt();
   const { userLocation } = useGame();
@@ -293,9 +302,19 @@ export function HuntARCamera({
    * character that was just unlocked — that is what stops the discovered
    * character from vanishing the moment its key is accepted.
    */
+  /**
+   * The stop: the location the team is walking to. It owns everything about the
+   * *place* — the pin, the radius, the clue, the key and the questions.
+   */
+  const stopCharacter = currentCharacter;
+  /**
+   * The character on screen: whoever is met here. The meeting greets with the
+   * first stop's own character; after that it is the next location's character
+   * (`metCharacter`), and once a reveal starts it is whoever they just met.
+   */
   const activeCharacter = phase === 'meeting'
-    ? meetingCharacter ?? reveal?.character ?? currentCharacter
-    : reveal?.character ?? currentCharacter;
+    ? meetingCharacter ?? reveal?.character ?? stopCharacter
+    : reveal?.character ?? metCharacter ?? stopCharacter;
 
   // Resolve only the manifest ID saved with the hunt. Keeping paths in the
   // manifest means a pasted/shared hunt can never make the camera fetch an
@@ -358,12 +377,12 @@ export function HuntARCamera({
   }, []);
 
   const sponsorBanner = useMemo(
-    () => sponsorBanners.find(banner => banner.id === activeCharacter?.sponsorBannerId) ?? null,
-    [sponsorBanners, activeCharacter]
+    () => sponsorBanners.find(banner => banner.id === stopCharacter?.sponsorBannerId) ?? null,
+    [sponsorBanners, stopCharacter]
   );
 
   const target = useMemo(() => {
-    if (!activeCharacter) return null;
+    if (!stopCharacter) return null;
     if (phase === 'meeting') {
       // Anchored to the player, not to the stop's pin: the team is not there yet,
       // so the character that greets them stands a fixed distance in front of the
@@ -371,12 +390,14 @@ export function HuntARCamera({
       if (!userLocation) return null;
       return { ...meetingAnchor(userLocation), altitudeMeters: 0 };
     }
+    // The pin belongs to the stop, not to whoever is met on it: the team walks
+    // to this place, so this is where the figure is composited.
     return {
-      latitude: activeCharacter.latitude,
-      longitude: activeCharacter.longitude,
-      altitudeMeters: activeCharacter.altitudeMeters,
+      latitude: stopCharacter.latitude,
+      longitude: stopCharacter.longitude,
+      altitudeMeters: stopCharacter.altitudeMeters,
     };
-  }, [activeCharacter, phase, userLocation]);
+  }, [stopCharacter, phase, userLocation]);
 
   // Listeners stay cheap while closed; the target is nulled so auto-aim idles.
   // The meeting needs no compass: its anchor is the player, not a bearing.
@@ -456,7 +477,7 @@ export function HuntARCamera({
     cameraState === 'active' &&
     activeCharacter !== null &&
     (phase === 'hunting'
-      ? Boolean(activeCharacter.hint)
+      ? Boolean(stopCharacter?.hint)
       : phase === 'reveal' || phase === 'meeting');
   /**
    * A selected banner takes over the slot above the character in every phase:
@@ -662,10 +683,10 @@ export function HuntARCamera({
     open &&
     phase === 'hunting' &&
     placement !== null &&
-    activeCharacter !== null &&
+    stopCharacter !== null &&
     cameraState === 'active' &&
     placement.isWithinAimCone &&
-    placement.distanceMeters <= activeCharacter.radiusMeters;
+    placement.distanceMeters <= stopCharacter.radiusMeters;
 
   /** Lock-on complete: the character holds its ground and asks for the key. */
   const handleSighted = useCallback(() => {
@@ -940,19 +961,19 @@ export function HuntARCamera({
     if (phase === 'meeting' && activeCharacter) {
       return `${activeCharacter.name} has your clue and key — then walk to ${activeCharacter.name}`;
     }
-    if (phase === 'key' && activeCharacter) {
-      return `At ${activeCharacter.name} — present your key below`;
+    if (phase === 'key' && stopCharacter) {
+      return `At ${stopCharacter.name} — present your key below`;
     }
-    if (phase === 'quiz' && activeCharacter) {
+    if (phase === 'quiz' && stopCharacter) {
       return `Key accepted — answer ${quizQuestions.length} question${
         quizQuestions.length === 1 ? '' : 's'
-      } to open ${activeCharacter.name}`;
+      } to open ${stopCharacter.name}`;
     }
     if (cameraState === 'starting') return 'Starting camera…';
     if (cameraState === 'error') return 'Camera unavailable';
     if (!userLocation) return 'Acquiring GPS signal…';
     if (!placement || activeCharacter === null) return 'Calibrating sensors…';
-    if (placement.distanceMeters > activeCharacter.radiusMeters) {
+    if (stopCharacter && placement.distanceMeters > stopCharacter.radiusMeters) {
       return `Move closer — ${formatDistance(placement.distanceMeters)} to go`;
     }
     if (!placement.isInView) {
@@ -1011,7 +1032,7 @@ export function HuntARCamera({
       ? `“${reveal.character.dialogue}”`
       : null
     : showHeadHint
-      ? activeCharacter?.hint ?? null
+      ? stopCharacter?.hint ?? null
       : null;
 
   return (
@@ -1039,7 +1060,7 @@ export function HuntARCamera({
           }
           mediaRestartToken={voiceCue}
           hint={bubbleText}
-          speaker={showHeadHint ? activeCharacter.name : null}
+          speaker={showHeadHint ? stopCharacter?.name ?? null : null}
           label={reveal ? `${revealSpeaker ?? 'They'} — ${speaking ? 'SPEAKING…' : 'SAYS'}` : null}
           bubbleExtra={reveal ? <RevealDetails result={reveal} /> : null}
           accent={characterMeta?.accent}
@@ -1061,7 +1082,7 @@ export function HuntARCamera({
             {characterMeta && (
               <span className="arChipDot" style={{ background: characterMeta.accent }} />
             )}
-            <span className="arTargetChipText">{activeCharacter?.name ?? 'No target'}</span>
+            <span className="arTargetChipText">{stopCharacter?.name ?? 'No target'}</span>
           </div>
           <div className="arTargetChipMetaRow">
             <MapPin size={10} />
@@ -1140,23 +1161,23 @@ export function HuntARCamera({
           </div>
         )}
 
-        {phase === 'hunting' && activeCharacter && !showHeadHint && (
+        {phase === 'hunting' && stopCharacter && !showHeadHint && (
           <div className="arHintBar">
             <span className="arHintBarLabel">HINT TO THIS LOCATION</span>
-            <p className="arHintBarText">{activeCharacter.hint}</p>
+            <p className="arHintBarText">{stopCharacter.hint}</p>
           </div>
         )}
 
-        {phase === 'hunting' && activeCharacter && (
+        {phase === 'hunting' && stopCharacter && (
           <div className="arChips">
             <span className="arChip">
               <MapPin size={11} />
-              {`within ${activeCharacter.radiusMeters}m to unlock`}
+              {`within ${stopCharacter.radiusMeters}m to unlock`}
             </span>
-            {activeCharacter.altitudeMeters > 0 && (
+            {stopCharacter.altitudeMeters > 0 && (
               <span className="arChip arChipAir">
                 <ArrowUp size={11} />
-                {activeCharacter.altitudeMeters}m above ground
+                {stopCharacter.altitudeMeters}m above ground
               </span>
             )}
           </div>
@@ -1165,8 +1186,8 @@ export function HuntARCamera({
         {/* Raw coordinates + the manual re-check. The camera frame is exactly
             where "it still says walk closer but I am standing here" happens, so
             the answer has to live on the frame too. */}
-        {phase === 'hunting' && activeCharacter && (
-          <LocationStatus target={activeCharacter} variant="compact" />
+        {phase === 'hunting' && stopCharacter && (
+          <LocationStatus target={stopCharacter} variant="compact" />
         )}
 
         {/* The opening meeting: the first location's character greets the team
@@ -1255,7 +1276,7 @@ export function HuntARCamera({
         {/* Question gate: a character that has reveal questions keeps its
             message and video locked until every one of them is answered —
             the discovery itself is recorded only after the last pass. */}
-        {phase === 'quiz' && activeCharacter && quizQuestion && (
+        {phase === 'quiz' && stopCharacter && quizQuestion && (
           <div className="arQuizPanel">
             <span className="arKeyPanelLabel">
               <ListChecks size={12} /> Question {quizIndex + 1} of {quizQuestions.length} — answer
@@ -1322,7 +1343,7 @@ export function HuntARCamera({
               </button>
             </form>
             <p className="arKeyHelper">
-              Nothing at {activeCharacter.name} is revealed — no message, no video — until every
+              Nothing at {stopCharacter.name} is revealed — no message, no video — until every
               question is answered correctly.
             </p>
           </div>

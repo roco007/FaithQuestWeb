@@ -16,11 +16,14 @@
  *   - the exported file states the hunt's order, START first and the stop the
  *     game must end on last (see section 12);
  *   - the opening meeting anchors the first location's character to the player,
- *     not to its pin, so it appears wherever the team joins (section 16).
+ *     not to its pin, so it appears wherever the team joins (section 16);
+ *   - a stop owns its place (pin, radius, clue, key, questions) while the
+ *     character met on that pin is the *next* location's (section 17).
  */
 import assert from 'node:assert/strict';
 import {
   buildRoute,
+  characterMetAt,
   dealPublishedRoute,
   isTreasureStop,
   treasureLocation,
@@ -382,6 +385,36 @@ assert.notDeepEqual(
   { latitude: meetingStop.latitude, longitude: meetingStop.longitude },
   'the anchor is the player\'s position, never the stop\'s pin'
 );
+
+// 17) Who a team meets at a stop: the stop owns the place, the character met on
+//     it is the next location's — the one whose clue is handed over when the
+//     gate is passed. The last stop has no next location, so its own character
+//     stands there.
+// Index-based, so this holds for whatever order the deal produced.
+for (let i = 0; i < resolved.length - 1; i++) {
+  assert.equal(
+    characterMetAt(resolved, resolved[i].id)?.id,
+    resolved[i + 1].id,
+    `stop ${i + 1}'s pin holds stop ${i + 2}'s character`
+  );
+}
+const lastStop = resolved[resolved.length - 1];
+assert.equal(
+  characterMetAt(resolved, lastStop.id)?.id,
+  lastStop.id,
+  'the last stop has no next location, so its own character stands there'
+);
+assert.equal(characterMetAt(resolved, 'GONE'), null, 'a stop off the route meets nobody');
+
+// The gate and the character are different entries: arriving at a stop, its own
+// key and questions open it, and the character met there is the next location's —
+// handing over that location's clue and key.
+const stopAtFirst = resolved[0];
+const metAtFirst = characterMetAt(resolved, stopAtFirst.id) as HuntCharacter;
+assert.notEqual(metAtFirst.id, stopAtFirst.id, 'a different character meets them there');
+assert.notEqual(stopAtFirst.hint, metAtFirst.hint, 'the clue met is not the one for the place they stand in');
+assert.equal(metAtFirst.key, resolved[1].key, 'and the key handed over is the one for its own location');
+assert.equal(stopAtFirst.key, resolved[0].key, "while the stop's own key opens the stop");
 
 console.log(
   `route tests passed — ${resolved.length} stops per route, first stops across 300 deals: ${[

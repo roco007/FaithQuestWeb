@@ -62,7 +62,7 @@ interface HuntPlayProps {
  * labelled fallback in the AR view itself, so a hunt is never soft-locked.
  */
 export function HuntPlay({ onExit }: HuntPlayProps) {
-  const { activeGame, activeProgress, activeRoute, currentCharacter } = useHunt();
+  const { activeGame, activeProgress, activeRoute, currentCharacter, metCharacter } = useHunt();
   const radar = useHuntRadar();
 
   const [celebration, setCelebration] = useState(false);
@@ -452,6 +452,7 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
         onClose={() => setArOpen(false)}
         onDiscoveryComplete={handleDiscoveryComplete}
         meetingCharacter={meetingPending ? currentCharacter : null}
+        metCharacter={metCharacter}
         onMeetingComplete={() => {
           setMeetingPending(false);
           setArOpen(false);

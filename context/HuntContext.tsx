@@ -19,9 +19,21 @@ import {
   extractShareCode,
 } from '../services/gameRepository';
 import { generateCharacterKey, keyMatches } from '../utils/keys';
-import { buildRoute, dealPublishedRoute, isTreasureStop, resolveRoute } from '../utils/huntRoute';
+import {
+  buildRoute,
+  characterMetAt,
+  dealPublishedRoute,
+  isTreasureStop,
+  resolveRoute,
+} from '../utils/huntRoute';
 
 export interface DiscoverResult {
+  /**
+   * The character the team met at the stop they just cleared — the *next*
+   * location's character, which is what speaks, plays its video and hands over
+   * the clue. The stop itself (its key, questions and place) is the entry
+   * before it in the route.
+   */
   character: HuntCharacter;
   isFinal: boolean;
   nextCharacter: HuntCharacter | null;
@@ -44,6 +56,14 @@ interface HuntContextType {
   activeRoute: HuntCharacter[];
   /** Next undiscovered location in the active hunt (null when finished). */
   currentCharacter: HuntCharacter | null;
+  /**
+   * The character standing at `currentCharacter`'s pin: the **next** location's
+   * character, since a stop owns its place (pin, radius, clue, key, questions)
+   * while the figure on it is the one that hands over the clue for the place it
+   * belongs to. The last stop's own character stands there
+   * (see `characterMetAt`).
+   */
+  metCharacter: HuntCharacter | null;
   isLoading: boolean;
   createGame: (draft: HuntGameDraft) => Promise<HuntGame>;
   updateGame: (game: HuntGame) => Promise<void>;
@@ -350,7 +370,10 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const nextUp = activeRoute.find(ch => !discoveredIds.includes(ch.id)) ?? null;
 
       return {
-        character: nextCharacter,
+        // The character they met, not the stop they walked to: that is the one
+        // that speaks, plays its video and hands over the next clue. At the last
+        // stop `nextUp` is null, so it is the stop's own character.
+        character: characterMetAt(activeRoute, nextCharacter.id) ?? nextCharacter,
         isFinal: isComplete,
         nextCharacter: nextUp,
         game: activeGame,
@@ -366,6 +389,16 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return activeRoute.find(ch => !discovered.has(ch.id)) ?? null;
   }, [activeRoute, activeProgress]);
 
+  /**
+   * Who is standing at the current stop's pin — the next location's character,
+   * so the reveal (and the video it plays) belongs to the place the hand-over
+   * is sending the team to, not to the place they are standing in.
+   */
+  const metCharacter = useMemo(
+    () => (currentCharacter ? characterMetAt(activeRoute, currentCharacter.id) : null),
+    [activeRoute, currentCharacter]
+  );
+
   const value = useMemo<HuntContextType>(
     () => ({
       createdGames,
@@ -373,6 +406,7 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
       activeProgress,
       activeRoute,
       currentCharacter,
+      metCharacter,
       isLoading,
       createGame,
       updateGame,

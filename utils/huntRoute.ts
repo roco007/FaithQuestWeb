@@ -182,6 +182,29 @@ function dealStops(
 }
 
 /**
+ * The character a team **meets** at a stop.
+ *
+ * A stop owns the *place*: its pin, radius, clue, key and questions. The figure
+ * standing on that pin is the **next location's** character — the one whose
+ * clue is handed over when this stop's gate is passed, and the one whose video
+ * plays when they are let through. So walking a route, a team meets each
+ * location's character one step ahead of the place they are standing in, which
+ * is what makes the hand-over read as "this character is sending you to its own
+ * location". The last stop has no next location, so its own character stands
+ * there.
+ *
+ * Returns null for a stop that is not on the route.
+ */
+export function characterMetAt(
+  route: HuntCharacter[],
+  stopId: string
+): HuntCharacter | null {
+  const index = route.findIndex(character => character.id === stopId);
+  if (index === -1) return null;
+  return route[index + 1] ?? route[index];
+}
+
+/**
  * The route a team actually plays: the hunt's locations in this team's order,
  * each one exactly as the creator authored it — its own coordinates, radius,
  * clue, character (name, subtitle, dialogue, asset, banner), questions and key.
