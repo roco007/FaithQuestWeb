@@ -920,6 +920,21 @@ export function HuntARCamera({
   }, [reveal, videoCharacterVoice]);
 
   /**
+   * Re-reads the meeting hand-over aloud — the first location's key and clue —
+   * for anyone who did not catch it the first time. Same rule as the reveal's
+   * replay: restart the cutout video from frame 1 so it stays in step with the
+   * voice, and let a video character speak for itself rather than stacking TTS
+   * on top of its own audio.
+   */
+  const handleReplayMeeting = useCallback(() => {
+    if (!meetingCharacter) return;
+    setVoiceCue(cue => cue + 1);
+    if (videoCharacterVoice) return;
+    setSpeaking(true);
+    void speakClue(buildMeetingSpeech(meetingCharacter), { onDone: () => setSpeaking(false) });
+  }, [meetingCharacter, videoCharacterVoice]);
+
+  /**
    * Dismisses the reveal. A non-final discovery re-arms the frame for the next
    * target with the camera still open, so the player can walk on with the
    * message fresh; a final one is handed to the caller, which celebrates.
@@ -1206,14 +1221,24 @@ export function HuntARCamera({
                 <span className="keyChip mono">{activeCharacter.key}</span>
               </div>
             )}
-            <button
-              type="button"
-              className="arKeySubmit"
-              style={{ marginTop: 10, width: '100%' }}
-              onClick={onMeetingComplete}
-            >
-              Start walking
-            </button>
+            <div className="arRevealActions" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="arRevealBtn arRevealReplay"
+                onClick={handleReplayMeeting}
+              >
+                <Volume2 size={15} />
+                {speaking ? 'Speaking…' : 'Replay message'}
+              </button>
+              <button
+                type="button"
+                className="arRevealBtn arRevealContinue"
+                onClick={onMeetingComplete}
+              >
+                Start walking
+                <ChevronRight size={16} />
+              </button>
+            </div>
             <p className="arKeyHelper">
               {`Follow the clue to ${activeCharacter.name} and present that key when you get there. Nothing is recorded until you arrive.`}
             </p>
