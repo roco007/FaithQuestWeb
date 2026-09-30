@@ -2622,6 +2622,19 @@ select:focus-visible {
   font-weight: 700;
 }
 
+/* Pause / resume toggle for a video character riding in the chip row. The chip
+   row sits inside the non-interactive bottom HUD, so the button opts back in. */
+.arChipBtn {
+  pointer-events: auto;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.arChipBtnPaused {
+  border-color: rgba(251, 191, 36, 0.6);
+  color: var(--amber);
+}
+
 .arChipAir {
   border-color: rgba(196, 181, 253, 0.55);
   color: #c4b5fd;

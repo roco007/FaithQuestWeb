@@ -15,6 +15,8 @@ import {
   Sparkles,
   Volume2,
   ListChecks,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { useHunt, DiscoverResult, assertPresentedKey } from '../context/HuntContext';
 import type { HuntCharacter } from '../types/hunt';
@@ -252,6 +254,13 @@ export function HuntARCamera({
   const [quizChecking, setQuizChecking] = useState(false);
   /** Set once the right key is presented — drives the speech over the head. */
   const [reveal, setReveal] = useState<DiscoverResult | null>(null);
+  /**
+   * The player paused a video character's clip on the frame. Gating `mediaPlaying`
+   * off is all it takes: the 3D layer pauses the cutout, and because the restart
+   * token is not bumped, resuming continues from the same frame rather than
+   * rewinding.
+   */
+  const [videoPaused, setVideoPaused] = useState(false);
   /** Deployment-owned roster resolved from the selected character's asset ID. */
   const [characterAssets, setCharacterAssets] = useState<CharacterAsset[]>([]);
   /** True while the reveal is being read aloud (drives the replay button). */
@@ -344,6 +353,13 @@ export function HuntARCamera({
    * instead.
    */
   const videoCharacterVoice = characterAsset?.kind === 'video';
+  /**
+   * The pause control only appears where a clip is playing: the meeting greeting
+   * and a reveal, both of which roll the character's own video. While hunting a
+   * cutout is held on frame 1, so there would be nothing to pause.
+   */
+  const canPauseVideo =
+    videoCharacterVoice && (phase === 'meeting' || phase === 'reveal');
 
   /**
    * Who the reveal is credited to in the speech bubble. A location's name is the
@@ -618,6 +634,7 @@ export function HuntARCamera({
     setQuizChecking(false);
     setSpeaking(false);
     setVoiceCue(0);
+    setVideoPaused(false);
     void orientation.requestOrientationPermission();
     void startCamera();
     return () => {
@@ -722,6 +739,7 @@ export function HuntARCamera({
   const beginMeeting = useCallback(
     (character: HuntCharacter) => {
       setReveal(null);
+      setVideoPaused(false);
       setPhase('meeting');
       triggerHaptic('success');
       setVoiceCue(cue => cue + 1);
@@ -779,6 +797,7 @@ export function HuntARCamera({
       setKeyInput('');
       setKeyError(null);
       setReveal(result);
+      setVideoPaused(false);
       setPhase('reveal');
       triggerHaptic('success');
       playSoundEffect(result.isFinal ? 'level_up' : 'correct');
@@ -912,6 +931,8 @@ export function HuntARCamera({
   const handleReplayVoice = useCallback(() => {
     if (!reveal) return;
     // Restart the cutout video from frame 1 so it stays in sync with the voice.
+    // Replaying also lifts a pause, since the rewind only runs while playing.
+    setVideoPaused(false);
     setVoiceCue(cue => cue + 1);
     // A video character replays its own audio — no TTS voiceover on top.
     if (videoCharacterVoice) return;
@@ -928,6 +949,7 @@ export function HuntARCamera({
    */
   const handleReplayMeeting = useCallback(() => {
     if (!meetingCharacter) return;
+    setVideoPaused(false);
     setVoiceCue(cue => cue + 1);
     if (videoCharacterVoice) return;
     setSpeaking(true);
@@ -1060,6 +1082,7 @@ export function HuntARCamera({
           // its own voice, or when no TTS engine exists to sync to.
           mediaPlaying={
             (phase === 'reveal' || phase === 'meeting') &&
+            !videoPaused &&
             (videoCharacterVoice ||
               speaking ||
               typeof window === 'undefined' ||
@@ -1169,6 +1192,24 @@ export function HuntARCamera({
         {activeCharacter && (
           <div className="arChips">
             <KeyInHand variant="chip" />
+            {/* Pause / resume a video character's clip while it plays — the
+                greeting at the meeting and the hand-over at a reveal. */}
+            {canPauseVideo && (
+              <button
+                type="button"
+                className={`arChip arChipBtn${videoPaused ? ' arChipBtnPaused' : ''}`}
+                onClick={() => setVideoPaused(paused => !paused)}
+                aria-pressed={videoPaused}
+                title={
+                  videoPaused
+                    ? 'Play this character\u2019s video'
+                    : 'Pause this character\u2019s video'
+                }
+              >
+                {videoPaused ? <Play size={11} /> : <Pause size={11} />}
+                {videoPaused ? 'Play video' : 'Pause video'}
+              </button>
+            )}
           </div>
         )}
 
