@@ -9,7 +9,9 @@
  *     opening hand-over gives stop 1's hint + character + key, and each reveal
  *     after a find hands over the next stop's;
  *   - the treasure is dealt last, so every route finishes where the treasure is;
- *   - nothing stands with the player: no re-anchoring, no key-less stop.
+ *   - nothing stands with the player: no re-anchoring, no key-less stop;
+ *   - the exported file states the hunt's order, START first and the stop the
+ *     game must end on last (see section 12).
  */
 import assert from 'node:assert/strict';
 import {
@@ -19,6 +21,7 @@ import {
   walkableStops,
   resolveRoute,
 } from '../utils/huntRoute';
+import { buildHuntExport, buildHuntOrder } from '../services/huntFile';
 import type { HuntCharacter, HuntGame } from '../types/hunt';
 
 const make = (id: string, order: number, extra: Partial<HuntCharacter> = {}): HuntCharacter => ({
@@ -193,6 +196,74 @@ assert.deepEqual(
 assert.equal(solo[0].latitude, soloStop.latitude);
 assert.equal(solo[1].latitude, authored('L2').latitude);
 assert.equal(solo[1].key, 'KEYL2');
+
+// 11) A hunt with no treasure tagged still ends somewhere: the last location in
+//     the order it was dealt/authored is the stop that closes the route, and the
+//     whole hunt can be completed. (Publishing stamps the flag on that last
+//     location — see `normaliseGame` — so this covers a hunt that reaches a
+//     device without one.)
+const untagged = resolveRoute({ characters: noTreasure }, null);
+assert.deepEqual(
+  untagged.map(stop => stop.id),
+  ['A', 'B', 'C'],
+  'with nothing tagged the authored order stands and closes on the last location'
+);
+assert.equal(treasureLocation(noTreasure), null, 'nothing is tagged in this fixture');
+assert.equal(
+  untagged[untagged.length - 1].id,
+  'C',
+  'the last location in the order is where the hunt ends'
+);
+
+// 12) The exported order: the authored locations by `order`, START first, and
+//     the last one marked as the stop the game must end on.
+const exportOrder = buildHuntOrder(game);
+assert.equal(exportOrder.start, 'START');
+assert.deepEqual(
+  exportOrder.stops.map(stop => [stop.position, stop.name, stop.isEnd]),
+  [
+    [1, 'L1', false],
+    [2, 'L2', false],
+    [3, 'L3', false],
+    [4, 'L4', false],
+    [5, 'L5', true],
+  ],
+  'stops are listed in authored order, with only the final one marked as the end'
+);
+assert.equal(
+  exportOrder.summary,
+  'START -> L1 -> L2 -> L3 -> L4 -> L5 (the game must end here)',
+  'the summary reads the order as one line, end marked'
+);
+
+// Order is read from `order`, not from array position.
+const shuffledArray = buildHuntOrder({
+  characters: [make('B', 2), make('A', 1), make('C', 3)],
+});
+assert.deepEqual(
+  shuffledArray.stops.map(stop => stop.name),
+  ['A', 'B', 'C'],
+  'a location array out of order still exports in its authored order'
+);
+assert.equal(
+  shuffledArray.stops[2].isEnd,
+  true,
+  'and the last authored location is where the game ends'
+);
+
+// A single-location hunt is its own end, and an empty one says so rather than
+// producing a dangling arrow.
+assert.equal(
+  buildHuntOrder({ characters: [make('Only', 1)] }).summary,
+  'START -> Only (the game must end here)'
+);
+assert.equal(buildHuntOrder({ characters: [] }).summary, 'START -> (no locations)');
+
+// The envelope carries the order beside the game, and re-importing the exported
+// file gives the same hunt back (the order is descriptive, never authoritative).
+const exported = buildHuntExport({ id: 'FQ-1', ...game } as HuntGame);
+assert.equal(exported.order.summary, exportOrder.summary, 'the file states the order');
+assert.ok(exported.game.characters.length === 5, 'the game still travels with it');
 
 console.log(
   `route tests passed — ${resolved.length} stops per route, first stops across 300 deals: ${[

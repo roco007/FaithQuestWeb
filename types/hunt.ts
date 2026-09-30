@@ -47,7 +47,11 @@ export interface HuntCharacter {
   id: string;
   /** 1-based position in the creator's list of locations. */
   order: number;
-  /** Name of the character that appears here — what the reveal is titled with. */
+  /**
+   * Name of this location — what the place itself is called. Shown on the route
+   * card, the radar and the AR banner once the team holds this stop's clue, and
+   * what the exported hunt's order lists for this stop.
+   */
   name: string;
   subtitle: string;
   /**
@@ -112,8 +116,12 @@ export interface HuntCharacter {
    * shuffled into a team's route — it is dealt last, so every team finishes at
    * the treasure whatever order they walked. Clearing its questions is what
    * shows the congratulations: the end-of-hunt announcement plus the character
-   * chosen for it (`HuntGame.endCharacterAssetId`). A hunt needs exactly one;
-   * publishing is refused without one.
+   * chosen for it (`HuntGame.endCharacterAssetId`).
+   *
+   * At most one location carries it, and it is optional: when a hunt tags none,
+   * publishing makes its last location in the order the treasure (see
+   * `normaliseGame`). A hunt saved before the flag existed also ends on its last
+   * dealt stop, whichever location that turns out to be for a given team.
    */
   isTreasure?: boolean;
   /**

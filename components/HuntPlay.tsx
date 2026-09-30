@@ -365,7 +365,7 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
                   in `HuntARCamera`, so this card only opens the view. */}
               <div className="hudLockedBar" style={{ marginTop: 16, marginBottom: 0 }}>
                 <Lock size={14} />
-                {`Spot ${currentCharacter.name} in the AR camera — the key is presented on the frame.`}
+                {`At ${currentCharacter.name}, the key is presented on the AR camera frame.`}
               </div>
               <button
                 type="button"
@@ -440,6 +440,10 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
               {activeRoute.map((ch, index) => {
                 const isDone = activeProgress.discoveredCharacterIds.includes(ch.id);
                 const isCurrent = ch.id === currentCharacter.id;
+                // The hunt ends on the last stop of THIS team's route: the tagged
+                // treasure, or — for a hunt that tags none — whichever location
+                // their dealt order happened to finish on.
+                const isEndStop = index === activeRoute.length - 1;
                 // Strict visibility: only what the team has been given shows —
                 // every stop they have cleared, plus the current one, whose
                 // name and line arrive with the hand-over (at the hunt's opening
@@ -458,10 +462,10 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
                       <div className="routeName">
                         {isRevealed ? ch.name : '???'}
                         {isCurrent && inRange && <span className="pill pillActive">Now</span>}
-                        {(ch.isTreasure || ch.isCongratulations) && (
+                        {isEndStop && (
                           <span
                             className="pill"
-                            title="Treasure location — never dealt, so every route finishes here"
+                            title="Where the hunt ends — the last stop of your route"
                           >
                             🎁 Treasure
                           </span>

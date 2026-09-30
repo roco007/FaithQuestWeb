@@ -99,6 +99,19 @@ function CreatorEditor() {
   /** Renumbers `order` to be a dense 1-based sequence after any edit. */
   const renumber = (list: HuntCharacter[]) => list.map((ch, i) => ({ ...ch, order: i + 1 }));
 
+  /**
+   * Which row ends the hunt: the ticked treasure location, or — when the
+   * creator ticked none — the last location in the order, which is what
+   * `normaliseGame` stores as the treasure on publish. Shown in the list so
+   * the end of the hunt is never a surprise, whichever way it was decided.
+   */
+  const treasureIndex = useMemo(() => {
+    const tagged = characters.findIndex(
+      character => character.isTreasure || character.isCongratulations
+    );
+    return tagged >= 0 ? tagged : characters.length - 1;
+  }, [characters]);
+
   const handleSaveCharacter = (character: HuntCharacter) => {
     setCharacters((prev) => {
       if (editingIndex !== null && prev[editingIndex]) {
@@ -174,12 +187,6 @@ function CreatorEditor() {
     }
     if (characters.length === 0) {
       setError('Place at least one location on the map.');
-      return;
-    }
-    if (!characters.some((character) => character.isTreasure || character.isCongratulations)) {
-      setError(
-        'Mark the treasure location: edit the location your hunt ends at and tick "This is the treasure location".'
-      );
       return;
     }
     if (!endAnnouncement.trim()) {
@@ -401,6 +408,17 @@ function CreatorEditor() {
         </button>
       </div>
 
+      {/* No ticked treasure is no longer a dead end — say who ends the hunt, so
+          the fallback is a decision rather than a surprise. */}
+      {characters.length > 0 &&
+        !characters.some(character => character.isTreasure || character.isCongratulations) && (
+          <p className="fieldHelp" style={{ margin: '0 0 10px' }}>
+            No location is ticked as the treasure, so <strong>{characters[treasureIndex]?.name}</strong>{' '}
+            — the last one in the order — is where every team&apos;s hunt ends. Tick{' '}
+            &ldquo;This is the treasure location&rdquo; on any location to choose the ending yourself.
+          </p>
+        )}
+
       {characters.length === 0 ? (
         <div className="card emptyState">
           <div className="emptyTitle">No locations placed yet</div>
@@ -450,10 +468,14 @@ function CreatorEditor() {
                       {character.questions!.length === 1 ? '' : 's'}
                     </span>
                   )}
-                  {(character.isTreasure || character.isCongratulations) && (
+                  {index === treasureIndex && (
                     <span
                       className="pill"
-                      title="Treasure location — never shuffled, so every team's route finishes here"
+                      title={
+                        character.isTreasure || character.isCongratulations
+                          ? 'Treasure location — never shuffled, so every team\'s route finishes here'
+                          : 'No location is ticked as the treasure, so the last location in the order is where the game ends'
+                      }
                     >
                       🎁 Treasure
                     </span>

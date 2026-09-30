@@ -166,11 +166,39 @@ location the creator adds after a team joined still gets walked, ahead of the
 treasure.
 
 The creator marks the treasure with **"This is the treasure location"** in the
-location editor — it is mandatory, and publishing a hunt without one is refused
-with the reason shown on `/creator`. A hunt has at most one: publishing keeps
-the first flagged location and clears the others. The treasure is walked to like
-any other stop (its own place, character, questions and key); clearing it is
-what shows the congratulations screen.
+location editor. A hunt has at most one: publishing keeps the first flagged
+location and clears the others. **The flag is optional** — a hunt that tags none
+ends at its **last location in the order**, which `normaliseGame` stamps as the
+treasure on publish, so `/creator` shows the 🎁 Treasure pill on that row and
+says so in a note above the list. A hunt that reaches a device untagged (a
+hand-written file, or one saved before the flag existed) ends the same way: the
+last stop its route dealt is where the hunt finishes. The treasure is walked to
+like any other stop (its own place, character, questions and key); clearing it
+is what shows the congratulations screen.
+
+## The exported file states the order
+
+Every exported hunt (`services/huntFile.ts`) carries an `order` block beside the
+game, so the file reads on its own:
+
+```json
+"order": {
+  "start": "START",
+  "stops": [
+    { "position": 1, "name": "The Old Well", "isEnd": false },
+    { "position": 2, "name": "Riverside Steps", "isEnd": false },
+    { "position": 3, "name": "The Bell Tower", "isEnd": true }
+  ],
+  "summary": "START -> The Old Well -> Riverside Steps -> The Bell Tower (the game must end here)"
+}
+```
+
+It is the hunt's **authored** order (`buildHuntOrder`), with `isEnd` on the last
+stop — the treasure, or the last location when nothing is tagged. It is
+descriptive, not authoritative: the order of record is each location's own
+`order` field, so the importer ignores `order` entirely and a hand-edited or
+stale block cannot desynchronise a hunt. Each joining team is still dealt its
+own shuffled order of the walkable locations.
 
 ## The end of the hunt
 

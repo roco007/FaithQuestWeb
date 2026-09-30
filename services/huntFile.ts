@@ -16,9 +16,15 @@ import type {
  * between devices with no backend.
  *
  * The file wraps the game in a small self-describing envelope
- * (`{ format, version, exportedAt, game }`) so future schema changes can be
- * detected, while the parser also accepts a bare `HuntGame` (the exact shape
+ * (`{ format, version, exportedAt, order, game }`) so future schema changes can
+ * be detected, while the parser also accepts a bare `HuntGame` (the exact shape
  * the share-code payload uses) so hand-written files work too.
+ *
+ * `order` is the hunt's authored order written out for a human — the location
+ * names from `START` through to the stop the game must end on (see
+ * `buildHuntOrder`). It is derived from `game.characters`, so the parser
+ * ignores it: the order of record is the locations' own `order` field, and a
+ * stale or hand-edited `order` in a file cannot desynchronise the hunt.
  *
  * A location travels complete: its place, hint, character, questions and key are
  * all its own. The only game-level additions are the end-of-hunt announcement
@@ -49,12 +55,67 @@ const HUNT_CHARACTER_TYPES: readonly HuntCharacterType[] = [
 const DEFAULT_RADIUS_METERS = 25;
 const DEFAULT_ALTITUDE_METERS = 0;
 
+/** One stop in the exported order. */
+export interface HuntExportOrderStop {
+  /** 1-based position in the hunt's order; the last stop is the end. */
+  position: number;
+  /** The location's name, as the creator wrote it. */
+  name: string;
+  /** True for the stop the game must end on (the treasure location). */
+  isEnd: boolean;
+}
+
+/**
+ * The hunt's order, written beside the game so the file reads on its own: where
+ * a team starts, which location they walk next, and where the game ends. Purely
+ * descriptive — the game itself carries the locations, and each team is still
+ * dealt its own order of them when they join (see `utils/huntRoute`).
+ */
+export interface HuntExportOrder {
+  /** Where the hunt starts: always `START`, since no stop is a fixed opener. */
+  start: string;
+  /** The location names in order; the last entry is where the game ends. */
+  stops: HuntExportOrderStop[];
+  /**
+   * The same order as one line — `START -> The Old Well -> Riverside Steps ->
+   * The Bell Tower (the game must end here)` — so someone skimming the file can
+   * read the route without expanding the JSON.
+   */
+  summary: string;
+}
+
 /** Envelope written around the game in exported files. */
 export interface HuntExportFile {
   format: typeof HUNT_EXPORT_FORMAT;
   version: number;
   exportedAt: string;
+  /** The hunt's order, start to end (see {@link HuntExportOrder}). */
+  order: HuntExportOrder;
   game: HuntGame;
+}
+
+/**
+ * Builds the exported order from a game's locations.
+ *
+ * The order is the authored one (locations by `order`, with the treasure last —
+ * `normaliseGame` already stores it there, tagging the final location itself
+ * when the creator ticked none), because that is the order the file documents.
+ * It is *not* any one team's route: each joining team is dealt its own shuffled
+ * order of the walkable locations, and the treasure closes every one of them.
+ */
+export function buildHuntOrder(game: Pick<HuntGame, 'characters'>): HuntExportOrder {
+  const locations = [...game.characters].sort((a, b) => a.order - b.order);
+  const stops: HuntExportOrderStop[] = locations.map((character, index) => ({
+    position: index + 1,
+    name: character.name,
+    isEnd: index === locations.length - 1,
+  }));
+  const names = stops.map(stop => stop.name);
+  const summary =
+    names.length === 0
+      ? 'START -> (no locations)'
+      : `START -> ${names.join(' -> ')} (the game must end here)`;
+  return { start: 'START', stops, summary };
 }
 
 /**
@@ -70,6 +131,7 @@ export function buildHuntExport(game: HuntGame): HuntExportFile {
     format: HUNT_EXPORT_FORMAT,
     version: HUNT_EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
+    order: buildHuntOrder(game),
     game,
   };
 }

@@ -121,9 +121,7 @@ function buildSpeech(result: DiscoverResult): string {
   }
   return [
     result.character.dialogue,
-    result.nextCharacter?.name
-      ? `Your next location is where ${result.nextCharacter.name} appears.`
-      : '',
+    result.nextCharacter?.name ? `Your next location: ${result.nextCharacter.name}.` : '',
     result.nextCharacter?.key ? `Your next key is ${spellKey(result.nextCharacter.key)}.` : '',
     result.nextCharacter?.hint ? `Your next clue: ${result.nextCharacter.hint}` : '',
   ]
@@ -141,7 +139,7 @@ function RevealDetails({ result }: { result: DiscoverResult }) {
     <div className="arBubbleExtra">
       {next?.name && (
         <div className="arBubbleMeta">
-          <span className="arBubbleMetaLabel">You will meet there</span>
+          <span className="arBubbleMetaLabel">Next location</span>
           <p className="arBubbleMetaText">{next.name}</p>
         </div>
       )}
@@ -295,6 +293,14 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
    * instead.
    */
   const videoCharacterVoice = characterAsset?.kind === 'video';
+
+  /**
+   * Who the reveal is credited to in the speech bubble. A location's name is the
+   * *place*, so it captions the bubble rather than speaking for it: the roster
+   * entry's own name is used whenever the character has one, and the location
+   * name is only the fallback.
+   */
+  const revealSpeaker = characterAsset?.name ?? reveal?.character.name ?? null;
 
   const renderCharacterType = characterAsset?.fallbackType ?? activeCharacter?.characterType;
 
@@ -822,15 +828,15 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
     if (reveal) {
       return reveal.isFinal
         ? 'Hunt complete — the treasure is yours!'
-        : `${reveal.character.name} hands over your next key`;
+        : `Key received — next location: ${reveal.nextCharacter?.name ?? 'coming up'}`;
     }
     if (phase === 'key' && activeCharacter) {
-      return `Sighted ${activeCharacter.name} — present your key below`;
+      return `At ${activeCharacter.name} — present your key below`;
     }
     if (phase === 'quiz' && activeCharacter) {
       return `Key accepted — answer ${quizQuestions.length} question${
         quizQuestions.length === 1 ? '' : 's'
-      } to unlock ${activeCharacter.name}`;
+      } to open ${activeCharacter.name}`;
     }
     if (cameraState === 'starting') return 'Starting camera…';
     if (cameraState === 'error') return 'Camera unavailable';
@@ -921,7 +927,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
           mediaRestartToken={voiceCue}
           hint={bubbleText}
           speaker={showHeadHint ? activeCharacter.name : null}
-          label={reveal ? `${reveal.character.name} — ${speaking ? 'SPEAKING…' : 'SAYS'}` : null}
+          label={reveal ? `${revealSpeaker ?? 'They'} — ${speaking ? 'SPEAKING…' : 'SAYS'}` : null}
           bubbleExtra={reveal ? <RevealDetails result={reveal} /> : null}
           accent={characterMeta?.accent}
           sponsorBanner={sponsorBanner}
@@ -1169,8 +1175,8 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
               </button>
             </form>
             <p className="arKeyHelper">
-              {activeCharacter.name} reveals nothing — no message, no video — until every question
-              is answered correctly.
+              Nothing at {activeCharacter.name} is revealed — no message, no video — until every
+              question is answered correctly.
             </p>
           </div>
         )}
@@ -1185,7 +1191,7 @@ export function HuntARCamera({ open, onClose, onDiscoveryComplete }: HuntARCamer
                 <div className="arBubbleHeader">
                   <span className="arBubbleDot" style={{ background: characterMeta?.accent }} />
                   <span className="arBubbleSpeaker" style={{ color: characterMeta?.accent }}>
-                    {reveal.character.name} — {speaking ? 'SPEAKING…' : 'SAYS'}
+                    {revealSpeaker ?? 'They'} — {speaking ? 'SPEAKING…' : 'SAYS'}
                   </span>
                 </div>
                 <p className="arBubbleText">“{reveal.character.dialogue}”</p>

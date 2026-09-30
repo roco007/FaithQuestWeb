@@ -94,7 +94,7 @@ function normaliseGame(
   const now = new Date().toISOString();
   const sorted = [...draft.characters].sort((a, b) => a.order - b.order);
 
-  // A hunt has exactly one treasure location: the first flagged one in authored
+  // A hunt has at most one treasure location: the first flagged one in authored
   // order wins, later flags are cleared, and the treasure is stored last so the
   // authored order itself reads route-shaped in exports, imports and share
   // codes. The legacy `isCongratulations` name is read but never written.
@@ -117,14 +117,17 @@ function normaliseGame(
     walkable.push(character);
   }
 
-  // The treasure is not optional: it is the location every team's route ends on,
-  // so a hunt without one has no place to finish (or to celebrate) at.
+  // A hunt with no tagged treasure still has to end somewhere, so the last
+  // location in the authored order becomes the treasure: it is stored last (as
+  // every route closes there) and is the final stop of the exported order.
   if (!treasure) {
-    throw new Error(
-      'Mark the treasure location before publishing: it is the place every team finishes at, ' +
-        'and clearing its questions is what shows the congratulations. Edit that location, tick ' +
-        '"This is the treasure location", and publish again.'
-    );
+    const last = walkable.pop();
+    if (!last) {
+      throw new Error('Add at least one location to the hunt before publishing.');
+    }
+    const flagged = { ...last, isTreasure: true };
+    delete flagged.isCongratulations;
+    treasure = flagged;
   }
 
   // The congratulations screen is the announcement plus the character added

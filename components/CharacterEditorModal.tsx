@@ -105,8 +105,9 @@ export function CharacterEditorModal({
   /** Reveal questions asked after the key is accepted (see `HuntQuestion`). */
   const [questions, setQuestions] = useState<HuntQuestion[]>(initial?.questions ?? []);
   /**
-   * The hunt's treasure location — where every team's route ends. Exactly one
-   * location needs it; publishing refuses a hunt without one.
+   * The hunt's treasure location — where every team's route ends. Tick at most
+   * one; when none is ticked, the hunt's last location is the treasure (see
+   * `normaliseGame`).
    */
   const [isTreasure, setIsTreasure] = useState(
     (initial?.isTreasure ?? initial?.isCongratulations) === true
@@ -529,20 +530,20 @@ export function CharacterEditorModal({
 
       <div className="field">
         <label className="fieldLabel" htmlFor="char-name">
-          Character Name *
+          Location Name *
         </label>
         <input
           id="char-name"
           className="input"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="The Bronze Sentinel"
+          placeholder="The Old Bell Tower"
         />
         <p className="fieldHelp">
-          Who stands at this location — the person, creature or figure this
-          character represents or guards. It is the name on the route card and the
-          radar once the team holds this stop&apos;s clue, the label on the AR
-          banner when they arrive, and who the reveal speaks as.
+          What this place is called — the name of the location itself, so the hunt reads as a
+          route of places rather than a cast of characters. Shown on the route card and the radar
+          once the team holds this stop&apos;s clue, and it is what the exported hunt&apos;s order
+          lists for this stop.
         </p>
       </div>
 
@@ -558,8 +559,8 @@ export function CharacterEditorModal({
           placeholder="Keeper of the eastern gate"
         />
         <p className="fieldHelp">
-          One short line under the name — what the character is, or what it guards
-          here. Shown wherever the name is shown.
+          One short line under the name — a detail about the place or the character that guards
+          it, e.g. <em>Keeper of the eastern gate</em>. Shown wherever the name is shown.
         </p>
       </div>
 
@@ -855,8 +856,8 @@ export function CharacterEditorModal({
         <p className="fieldHelp">
           The place the hunt ends: it is never shuffled into a team&apos;s route — every route
           finishes here. Clearing this location&apos;s questions is what shows the congratulations
-          screen, with the End-of-Hunt Announcement and the character chosen beside it. A hunt
-          needs exactly one treasure location, and publishing is refused without it.
+          screen, with the End-of-Hunt Announcement and the character chosen beside it. Tick one
+          location only; if you tick none, the last location in the order is used instead.
         </p>
       </div>
 

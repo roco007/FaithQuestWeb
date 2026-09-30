@@ -29,15 +29,17 @@ export function currentOrigin(): string {
  */
 export function buildGameShareMessage(game: HuntGame, origin = ''): string {
   const code = encodeGameShareCode(game);
-  const firstKey = game.characters[0]?.key?.trim();
+  const anyKey = game.characters.some(character => character.key?.trim());
   const joinUrl = origin ? buildGameJoinUrl(game, origin) : '';
   return [
     `⛪ FaithQuest treasure hunt: "${game.title}"`,
     game.description ? game.description : '',
     ``,
     `Hunt number: ${game.id}`,
-    `Characters: ${game.characters.length}`,
-    firstKey ? `First key: ${firstKey} — hand this to players to begin` : '',
+    `Locations: ${game.characters.length} — every team is dealt its own order`,
+    anyKey
+      ? 'Keys belong to locations: each team is given the key to the first location of its own route in-app when the hunt opens.'
+      : '',
     joinUrl ? `Open this link to join (it asks first, then adds you to the hunt):` : '',
     joinUrl ? joinUrl : '',
     ``,
