@@ -19,7 +19,7 @@ import {
   extractShareCode,
 } from '../services/gameRepository';
 import { generateCharacterKey, keyMatches } from '../utils/keys';
-import { buildRoute, isTreasureStop, resolveRoute } from '../utils/huntRoute';
+import { buildRoute, dealPublishedRoute, isTreasureStop, resolveRoute } from '../utils/huntRoute';
 
 export interface DiscoverResult {
   character: HuntCharacter;
@@ -94,10 +94,12 @@ function normaliseGame(
   const now = new Date().toISOString();
   const sorted = [...draft.characters].sort((a, b) => a.order - b.order);
 
-  // A hunt has at most one treasure location: the first flagged one in authored
+  // A hunt tags at most one treasure location: the first flagged one in authored
   // order wins, later flags are cleared, and the treasure is stored last so the
-  // authored order itself reads route-shaped in exports, imports and share
-  // codes. The legacy `isCongratulations` name is read but never written.
+  // authored order itself reads route-shaped in exports and share codes. A hunt
+  // that tags none is not stamped at all — its whole list is dealt, and the last
+  // location of the dealt order is where that hunt ends. The legacy
+  // `isCongratulations` name is read but never written.
   let treasure: HuntCharacter | null = null;
   const walkable: HuntCharacter[] = [];
   for (const character of sorted) {
@@ -117,19 +119,9 @@ function normaliseGame(
     walkable.push(character);
   }
 
-  // A hunt with no tagged treasure still has to end somewhere, so the last
-  // location in the authored order becomes the treasure: it is stored last (as
-  // every route closes there) and is the final stop of the exported order.
-  if (!treasure) {
-    const last = walkable.pop();
-    if (!last) {
-      throw new Error('Add at least one location to the hunt before publishing.');
-    }
-    const flagged = { ...last, isTreasure: true };
-    delete flagged.isCongratulations;
-    treasure = flagged;
-  }
-
+  // Nothing is stamped when no location is tagged: an untagged hunt is dealt
+  // whole, so its last dealt location is where that hunt ends (and which place
+  // that is changes with every publish).
   // The congratulations screen is the announcement plus the character added
   // next to it, so a hunt cannot be published without both.
   const endCharacterAssetId = draft.endCharacterAssetId?.trim() || '';
@@ -141,7 +133,8 @@ function normaliseGame(
     );
   }
 
-  const characters = [...walkable, treasure].map((ch, index) => ({
+  const ordered = treasure ? [...walkable, treasure] : [...walkable];
+  const characters = ordered.map((ch, index) => ({
     ...ch,
     order: index + 1,
     // Backfill discovery keys so every published location needs one.
@@ -158,6 +151,12 @@ function normaliseGame(
     endAnnouncement: draft.endAnnouncement.trim(),
     endCharacterAssetId,
     characters,
+    // Every press of Publish / Save Changes deals a new order and shares it: the
+    // walkable locations shuffled with a tagged treasure held back for last, or
+    // the whole list shuffled when nothing is tagged (so the hunt ends wherever
+    // this deal finishes). It travels in the share link, the share code and the
+    // exported file; teams already walking keep the order they joined with.
+    route: dealPublishedRoute(characters),
   };
 }
 
@@ -281,11 +280,13 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
         progress = {
           gameId: game.id,
           joinedAt: new Date().toISOString(),
-          // Deal this team's round now: the walkable locations shuffled, the
-          // treasure left out — it is always appended last, so every route
-          // finishes where the treasure waits. Progress that already exists
-          // keeps the route it was dealt: never reshuffle mid-hunt.
-          route: buildRoute(game.characters),
+          // Pin this round's order now, so a creator re-publishing mid-hunt
+          // cannot move the stops under this team's feet: the order the hunt was
+          // published with (every publish deals a fresh one, and it travels in
+          // the share link), or a deal of the walkable locations for a hunt saved
+          // before routes existed. Progress that already exists keeps the route
+          // it joined with.
+          route: game.route?.length ? [...game.route] : buildRoute(game.characters),
           discoveredCharacterIds: [],
           status: 'active',
           completedAt: null,

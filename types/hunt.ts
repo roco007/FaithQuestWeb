@@ -113,15 +113,15 @@ export interface HuntCharacter {
   questions?: HuntQuestion[];
   /**
    * Marks the **treasure location**: the place the hunt ends. It is never
-   * shuffled into a team's route — it is dealt last, so every team finishes at
-   * the treasure whatever order they walked. Clearing its questions is what
-   * shows the congratulations: the end-of-hunt announcement plus the character
-   * chosen for it (`HuntGame.endCharacterAssetId`).
+   * shuffled into a publish's deal — it is held back and dealt last, so every
+   * team finishes at the treasure whatever order they walked. Clearing its
+   * questions is what shows the congratulations: the end-of-hunt announcement
+   * plus the character chosen for it (`HuntGame.endCharacterAssetId`).
    *
-   * At most one location carries it, and it is optional: when a hunt tags none,
-   * publishing makes its last location in the order the treasure (see
-   * `normaliseGame`). A hunt saved before the flag existed also ends on its last
-   * dealt stop, whichever location that turns out to be for a given team.
+   * At most one location carries it, and it is optional: a hunt that tags none is
+   * shuffled whole (`dealPublishedRoute`), and the last location of that dealt
+   * order is where the hunt ends — a different place each time the hunt is
+   * re-published.
    */
   isTreasure?: boolean;
   /**
@@ -150,8 +150,21 @@ export interface HuntGame {
    * character.
    */
   endCharacterAssetId?: string | null;
-  /** The hunt's locations sorted by `order` ascending — the treasure last. */
+  /** The hunt's locations sorted by `order` ascending. */
   characters: HuntCharacter[];
+  /**
+   * The order this publish dealt: location IDs in the order teams walk them,
+   * with the stop the hunt ends on last (see `dealPublishedRoute`). It is dealt
+   * afresh on every Publish / Save Changes and travels with the hunt — in the
+   * share link, the share code and the exported file — so publishing the same
+   * hunt again shares a different route.
+   *
+   * A round already in progress keeps the order it joined with
+   * (`HuntProgress.route`), so re-publishing never moves the stops under a team
+   * that is walking. Absent on hunts saved before routes existed: those play in
+   * the authored order.
+   */
+  route?: string[];
 }
 
 export type HuntStatus = 'active' | 'completed';
@@ -162,13 +175,11 @@ export interface HuntProgress {
   joinedAt: string;
   discoveredCharacterIds: string[];
   /**
-   * This team's stop order, dealt once when the round starts (on join): the
-   * hunt's **walkable** location IDs shuffled at random. The treasure location
-   * is never dealt — it is appended last, so every team's hunt finishes at the
-   * treasure whatever path their shuffle took. Discovery always follows this
-   * order, so no two teams walk the same path. Absent on progress saved before
-   * routes existed — those fall back to the authored order and are never
-   * reshuffled mid-hunt (see `resolveRoute`).
+   * This team's stop order, pinned when the round started (on join): the order
+   * the hunt was published with, or a deal of the walkable locations for a hunt
+   * shared before routes existed. Discovery always follows this order, and a
+   * creator re-publishing the hunt mid-round cannot reshuffle it — the new deal
+   * applies to teams that join afterwards (see `resolveRoute`).
    */
   route?: string[];
   status: HuntStatus;

@@ -2,7 +2,10 @@
  * Route-engine checks for the location model, run with `npm run test:route`.
  *
  * The model under test (see `utils/huntRoute.ts`):
- *   - the order is dealt per team and never includes the treasure location;
+ *   - every publish deals a fresh order: a location tagged as the treasure is
+ *     held back for last, a hunt that tags none is shuffled whole;
+ *   - a round in progress keeps the order it joined with, so re-publishing
+ *     never moves the stops under a team's feet;
  *   - every stop IS the location the creator authored: its own coordinates,
  *     radius, hint, character, questions and key, untouched by the deal;
  *   - the package a team holds is always the one for the stop ahead — the
@@ -16,6 +19,7 @@
 import assert from 'node:assert/strict';
 import {
   buildRoute,
+  dealPublishedRoute,
   isTreasureStop,
   treasureLocation,
   walkableStops,
@@ -168,8 +172,9 @@ assert.deepEqual(
   'a stored route of nothing but the treasure falls back to every walkable location'
 );
 
-// 9) No treasure at all (publishing refuses, but old shared files exist): the
-//    route is simply every location in order, and each still stands its ground.
+// 9) No location tagged as the treasure (the deal decides the end, and old
+//    shared files exist): the route is simply every location in order, and each
+//    still stands its ground.
 const noTreasure: HuntCharacter[] = [make('A', 1), make('B', 2), make('C', 3)];
 const plain = resolveRoute({ characters: noTreasure }, { route: ['C', 'A', 'B'] });
 assert.deepEqual(
@@ -199,9 +204,8 @@ assert.equal(solo[1].key, 'KEYL2');
 
 // 11) A hunt with no treasure tagged still ends somewhere: the last location in
 //     the order it was dealt/authored is the stop that closes the route, and the
-//     whole hunt can be completed. (Publishing stamps the flag on that last
-//     location — see `normaliseGame` — so this covers a hunt that reaches a
-//     device without one.)
+//     whole hunt can be completed. Nothing is stamped on publish — an untagged
+//     hunt keeps every location walkable, so the deal decides where it ends.
 const untagged = resolveRoute({ characters: noTreasure }, null);
 assert.deepEqual(
   untagged.map(stop => stop.id),
@@ -215,28 +219,30 @@ assert.equal(
   'the last location in the order is where the hunt ends'
 );
 
-// 12) The exported order: the authored locations by `order`, START first, and
-//     the last one marked as the stop the game must end on.
+// 12) The exported order: the order teams walk (the same one `resolveRoute`
+//     plays, so the file and play cannot disagree), START first and the stop the
+//     game must end on last. A hunt with no dealt route exports the authored
+//     order, with the treasure closing it.
 const exportOrder = buildHuntOrder(game);
 assert.equal(exportOrder.start, 'START');
 assert.deepEqual(
   exportOrder.stops.map(stop => [stop.position, stop.name, stop.isEnd]),
   [
     [1, 'L1', false],
-    [2, 'L2', false],
-    [3, 'L3', false],
-    [4, 'L4', false],
-    [5, 'L5', true],
+    [2, 'L3', false],
+    [3, 'L4', false],
+    [4, 'L5', false],
+    [5, 'L2', true],
   ],
-  'stops are listed in authored order, with only the final one marked as the end'
+  'stops are listed in walk order, with the treasure as the final stop'
 );
 assert.equal(
   exportOrder.summary,
-  'START -> L1 -> L2 -> L3 -> L4 -> L5 (the game must end here)',
+  'START -> L1 -> L3 -> L4 -> L5 -> L2 (the game must end here)',
   'the summary reads the order as one line, end marked'
 );
 
-// Order is read from `order`, not from array position.
+// A location array out of authored order still exports in `order` order.
 const shuffledArray = buildHuntOrder({
   characters: [make('B', 2), make('A', 1), make('C', 3)],
 });
@@ -248,7 +254,7 @@ assert.deepEqual(
 assert.equal(
   shuffledArray.stops[2].isEnd,
   true,
-  'and the last authored location is where the game ends'
+  'and, with nothing tagged, the last location of that order is where the game ends'
 );
 
 // A single-location hunt is its own end, and an empty one says so rather than
@@ -264,6 +270,85 @@ assert.equal(buildHuntOrder({ characters: [] }).summary, 'START -> (no locations
 const exported = buildHuntExport({ id: 'FQ-1', ...game } as HuntGame);
 assert.equal(exported.order.summary, exportOrder.summary, 'the file states the order');
 assert.ok(exported.game.characters.length === 5, 'the game still travels with it');
+
+// 13) A publish deals a fresh order every time. With a location tagged as the
+//     treasure, it is held back for last and every other location is shuffled;
+//     with nothing tagged, the whole list is shuffled, so the end moves too.
+const publishedOrders = new Set<string>();
+for (let i = 0; i < 300; i++) {
+  const deal = dealPublishedRoute(characters);
+  assert.equal(deal.length, characters.length, 'a deal covers every location');
+  assert.equal(new Set(deal).size, characters.length, 'each location exactly once');
+  assert.equal(deal[deal.length - 1], 'L2', 'the tagged treasure is dealt last, never shuffled');
+  assert.notEqual(deal[0], 'L2', 'and never dealt first');
+  assert.deepEqual(
+    [...deal].sort(),
+    [...authoredWalkable, 'L2'].sort(),
+    'nothing is dropped and nothing is duplicated'
+  );
+  publishedOrders.add(deal.join('>'));
+}
+assert.ok(
+  publishedOrders.size >= 3,
+  `re-publishing should deal a new order each time: ${publishedOrders.size} distinct`
+);
+
+const untaggedOrders = new Set<string>();
+const untaggedEnds = new Set<string>();
+for (let i = 0; i < 300; i++) {
+  const deal = dealPublishedRoute(noTreasure);
+  assert.equal(deal.length, noTreasure.length, 'an untagged hunt deals its whole list');
+  assert.equal(new Set(deal).size, noTreasure.length, 'each location exactly once');
+  untaggedOrders.add(deal.join('>'));
+  untaggedEnds.add(deal[deal.length - 1]);
+}
+assert.ok(untaggedOrders.size >= 3, 'an untagged hunt is re-dealt too');
+assert.ok(
+  untaggedEnds.size >= 2,
+  `and its end is wherever the new order finished: ${[...untaggedEnds].join(', ')}`
+);
+
+// 14) Which order a team plays, in order of authority: the round it joined
+//     with, then the order this publish dealt, then the authored order.
+const publishedGame = {
+  characters,
+  route: dealPublishedRoute(characters),
+} satisfies Pick<HuntGame, 'characters' | 'route'>;
+const joiningNow = resolveRoute(publishedGame, null);
+assert.deepEqual(
+  joiningNow.map(stop => stop.id),
+  publishedGame.route,
+  'a team joining from this publish walks the order the publish dealt'
+);
+assert.equal(joiningNow[joiningNow.length - 1].id, 'L2', 'which still ends at the treasure');
+
+const republished = { characters, route: dealPublishedRoute(characters) };
+const midRound = resolveRoute(republished, { route: publishedGame.route });
+assert.deepEqual(
+  midRound.map(stop => stop.id),
+  publishedGame.route,
+  'a round in progress keeps the order it joined with, whatever was published since'
+);
+const joiningLater = resolveRoute(republished, null);
+assert.deepEqual(
+  joiningLater.map(stop => stop.id),
+  republished.route,
+  'the new deal applies to teams that join afterwards'
+);
+
+// 15) The exported order states the order that publish dealt, not the authored
+//     list, so the file and the share link cannot disagree.
+const dealtOrder = buildHuntOrder(publishedGame);
+assert.deepEqual(
+  dealtOrder.stops.map(stop => stop.name),
+  publishedGame.route,
+  'the file lists the dealt order'
+);
+assert.equal(
+  dealtOrder.stops[dealtOrder.stops.length - 1].isEnd,
+  true,
+  'with the stop the hunt ends on marked last'
+);
 
 console.log(
   `route tests passed — ${resolved.length} stops per route, first stops across 300 deals: ${[

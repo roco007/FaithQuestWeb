@@ -1,3 +1,4 @@
+import { resolveRoute } from '../utils/huntRoute';
 import type {
   HuntCharacter,
   HuntCharacterType,
@@ -97,19 +98,26 @@ export interface HuntExportFile {
 /**
  * Builds the exported order from a game's locations.
  *
- * The order is the authored one (locations by `order`, with the treasure last —
- * `normaliseGame` already stores it there, tagging the final location itself
- * when the creator ticked none), because that is the order the file documents.
- * It is *not* any one team's route: each joining team is dealt its own shuffled
- * order of the walkable locations, and the treasure closes every one of them.
+ * This is the order teams are handed, read from `resolveRoute` so the file
+ * cannot disagree with play: the order the publish dealt (`game.route` — a fresh
+ * shuffle on every Publish / Save Changes), or the authored order for a hunt
+ * saved before routes existed. The treasure, when one is tagged, closes the
+ * order; when none is, the last location the deal produced is where the hunt
+ * ends.
+ *
+ * It is still the *published* order rather than any one team's route: a round
+ * already in progress keeps the order it joined with (`HuntProgress.route`), so
+ * a later re-publish can leave a team walking an older order than this file
+ * describes.
  */
-export function buildHuntOrder(game: Pick<HuntGame, 'characters'>): HuntExportOrder {
-  const locations = [...game.characters].sort((a, b) => a.order - b.order);
-  const stops: HuntExportOrderStop[] = locations.map((character, index) => ({
-    position: index + 1,
-    name: character.name,
-    isEnd: index === locations.length - 1,
-  }));
+export function buildHuntOrder(game: Pick<HuntGame, 'characters' | 'route'>): HuntExportOrder {
+  const stops: HuntExportOrderStop[] = resolveRoute(game, null).map(
+    (character, index, all) => ({
+      position: index + 1,
+      name: character.name,
+      isEnd: index === all.length - 1,
+    })
+  );
   const names = stops.map(stop => stop.name);
   const summary =
     names.length === 0

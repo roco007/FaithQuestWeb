@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, Suspense, type ChangeEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, ChevronUp, ChevronDown, Trash2, Pencil, Rocket, Share2, Wand2, Copy, Check, Link2, Download, Upload } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Trash2, Pencil, Rocket, Share2, Wand2, Copy, Check, Link2, Download, Upload, Sparkles } from 'lucide-react';
 import { useHunt } from '../../context/HuntContext';
 import { useGame } from '../../context/GameContext';
 import type { HuntCharacter, HuntGame, HuntGameDraft } from '../../types/hunt';
@@ -11,7 +11,7 @@ import { loadCharacterAssets } from '../../services/characterAssets';
 import { CharacterEditorModal } from '../../components/CharacterEditorModal';
 import { Modal } from '../../components/Modal';
 import { buildGameJoinUrl, buildGameShareMessage, currentOrigin } from '../../services/shareGame';
-import { downloadHuntGame, parseHuntGameJson, type ImportedHunt } from '../../services/huntFile';
+import { downloadHuntGame, parseHuntGameJson, buildHuntOrder, type ImportedHunt } from '../../services/huntFile';
 import { triggerHaptic } from '../../utils/sound';
 
 /** Character-type emoji, for the location list. */
@@ -100,17 +100,15 @@ function CreatorEditor() {
   const renumber = (list: HuntCharacter[]) => list.map((ch, i) => ({ ...ch, order: i + 1 }));
 
   /**
-   * Which row ends the hunt: the ticked treasure location, or — when the
-   * creator ticked none — the last location in the order, which is what
-   * `normaliseGame` stores as the treasure on publish. Shown in the list so
-   * the end of the hunt is never a surprise, whichever way it was decided.
+   * The row holding the treasure tick, or -1 when the creator has ticked none.
+   * An untagged hunt is shuffled whole on every publish, so no row in the
+   * authored list is "the end" — the deal decides that, and the share sheet
+   * shows the order just dealt (see `dealPublishedRoute`).
    */
-  const treasureIndex = useMemo(() => {
-    const tagged = characters.findIndex(
-      character => character.isTreasure || character.isCongratulations
-    );
-    return tagged >= 0 ? tagged : characters.length - 1;
-  }, [characters]);
+  const treasureIndex = useMemo(
+    () => characters.findIndex(character => character.isTreasure || character.isCongratulations),
+    [characters]
+  );
 
   const handleSaveCharacter = (character: HuntCharacter) => {
     setCharacters((prev) => {
@@ -408,16 +406,27 @@ function CreatorEditor() {
         </button>
       </div>
 
-      {/* No ticked treasure is no longer a dead end — say who ends the hunt, so
-          the fallback is a decision rather than a surprise. */}
-      {characters.length > 0 &&
-        !characters.some(character => character.isTreasure || character.isCongratulations) && (
-          <p className="fieldHelp" style={{ margin: '0 0 10px' }}>
-            No location is ticked as the treasure, so <strong>{characters[treasureIndex]?.name}</strong>{' '}
-            — the last one in the order — is where every team&apos;s hunt ends. Tick{' '}
-            &ldquo;This is the treasure location&rdquo; on any location to choose the ending yourself.
-          </p>
-        )}
+      {/* Say which order a publish will deal, so the end of the hunt is never a
+          surprise: a tagged treasure is held back for last, an untagged hunt is
+          shuffled whole. */}
+      {characters.length > 0 && (
+        <p className="fieldHelp" style={{ margin: '0 0 10px' }}>
+          {treasureIndex >= 0 ? (
+            <>
+              <strong>{characters[treasureIndex]?.name}</strong> is the treasure: it is held back
+              and dealt last, and every other location is shuffled.
+            </>
+          ) : (
+            <>
+              No location is ticked as the treasure, so the <strong>whole list</strong> is shuffled
+              and the hunt ends at the last location of whatever order the publish deals. Tick
+              &ldquo;This is the treasure location&rdquo; to fix the ending yourself.
+            </>
+          )}{' '}
+          Every press of Publish / Save Changes deals a new order, and the share link below carries
+          that one.
+        </p>
+      )}
 
       {characters.length === 0 ? (
         <div className="card emptyState">
@@ -471,11 +480,7 @@ function CreatorEditor() {
                   {index === treasureIndex && (
                     <span
                       className="pill"
-                      title={
-                        character.isTreasure || character.isCongratulations
-                          ? 'Treasure location — never shuffled, so every team\'s route finishes here'
-                          : 'No location is ticked as the treasure, so the last location in the order is where the game ends'
-                      }
+                      title="Treasure location — never shuffled, so every team's route finishes here"
                     >
                       🎁 Treasure
                     </span>
@@ -562,10 +567,24 @@ function CreatorEditor() {
         {publishedGame && (
           <>
             <p className="shareLead">
-              Your hunt is live. Send players the link below — opening it takes them straight to
-              this hunt and asks whether they want to join. Download the JSON file to keep a
-              reusable copy you can upload on the Create Game screen later to reopen and edit
-              this hunt.
+              Your hunt is live, and this publish dealt a new order of locations — the link below
+              carries it. Opening the link takes players straight to this hunt and asks whether
+              they want to join. Publish again (or press Save Changes) to deal and share a
+              different order. Download the JSON file to keep a reusable copy you can upload on
+              the Create Game screen later to reopen and edit this hunt.
+            </p>
+
+            {/* The order just dealt: what teams joining from this link will walk,
+                and where this publish ends. Recomputed on every publish. */}
+            <label className="fieldLabel" htmlFor="share-order">
+              <Sparkles size={12} /> This publish&apos;s order
+            </label>
+            <div id="share-order" className="shareCode mono" style={{ whiteSpace: 'normal' }}>
+              {buildHuntOrder(publishedGame).summary}
+            </div>
+            <p className="fieldHelp">
+              A tagged treasure location is held back for last; when no location is ticked as the
+              treasure, the whole list is shuffled and the last one here is where that hunt ends.
             </p>
 
             <label className="fieldLabel" htmlFor="share-link">

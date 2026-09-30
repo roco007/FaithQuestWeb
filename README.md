@@ -129,20 +129,41 @@ hunt key behave identically in the join box:
 Anything else is rejected with the "Game not found" error rather than resolved to
 a different hunt.
 
-## Teams never walk the same route
+## Every publish deals a new order
 
-A team that finishes early used to be the easiest way to solve a hunt: follow
-them. That is closed off — every team is dealt their **own stop order** when
-their round starts, in `utils/huntRoute.ts`:
+The order of locations is not fixed by the creator — it is **dealt fresh every
+time the hunt is published**, and that deal is what gets shared, in
+`utils/huntRoute.ts`:
 
-- `buildRoute` — called once by `joinGame` and stored on `HuntProgress.route`.
-  It deals the hunt's **walkable locations** (everything except the treasure)
-  with an unbiased Fisher–Yates draw. The treasure location is never shuffled:
-  it is where every team's hunt ends.
+- `dealPublishedRoute` — called once per Publish / Save Changes from
+  `normaliseGame`, and stored on the hunt as `HuntGame.route`. It shuffles with
+  an unbiased Fisher–Yates draw, and the treasure rule is:
+
+  | a location is tagged **"This is the treasure location"** | nothing is tagged |
+  | --- | --- |
+  | it is **held back** and dealt **last**; every other location is shuffled | the **whole list** is shuffled, and the last location of the deal is where that hunt ends |
+
+  So the same hunt published twice hands out two different routes, and the
+  share link, the share code and the exported file all carry the order that
+  publish dealt. Re-publishing mid-round never disturbs a team that is already
+  walking: its order is pinned on join (`HuntProgress.route`).
 - `resolveRoute` — the only place a route becomes stops, and **nothing is
   rewritten**: each stop is the location the creator authored, with its own
-  coordinates, radius, hint, character, questions and key, in this team's dealt
-  order with the treasure last:
+  coordinates, radius, hint, character, questions and key, in the dealt order
+  with the end last:
+
+  | the team walks | the order came from |
+  | --- | --- |
+  | the order it joined with | pinned on join, so a re-publish never moves a stop under it |
+  | the order this publish dealt | `HuntGame.route` — what the share link and file carry |
+  | the authored order | a hunt saved before routes existed |
+
+  | stop | place | character + questions | opened by |
+  | --- | --- | --- | --- |
+  | dealt stop 1 | stop 1's own pin | stop 1's own | stop 1's key (given at the opening) |
+  | dealt stop 2 | stop 2's own pin | stop 2's own | stop 2's key (given at stop 1's reveal) |
+  | … | … | … | … |
+  | the last dealt stop | its own pin | its own | its key (given at the stop before) |
 
   | stop | place | character + questions | opened by |
   | --- | --- | --- | --- |
@@ -160,21 +181,18 @@ location's H + C + K.
 
 Discovery, the radar, the AR camera, the key ribbon and the clue line all read
 `activeRoute` from `HuntContext` — never `activeGame.characters`, which stays in
-the creator's authored order. Progress saved before routes existed carries no
-`route` and plays the authored order; a round in progress is never reshuffled. A
-location the creator adds after a team joined still gets walked, ahead of the
-treasure.
+the creator's authored order. A location the creator adds after a deal still
+gets walked, ahead of the end.
 
 The creator marks the treasure with **"This is the treasure location"** in the
 location editor. A hunt has at most one: publishing keeps the first flagged
-location and clears the others. **The flag is optional** — a hunt that tags none
-ends at its **last location in the order**, which `normaliseGame` stamps as the
-treasure on publish, so `/creator` shows the 🎁 Treasure pill on that row and
-says so in a note above the list. A hunt that reaches a device untagged (a
-hand-written file, or one saved before the flag existed) ends the same way: the
-last stop its route dealt is where the hunt finishes. The treasure is walked to
-like any other stop (its own place, character, questions and key); clearing it
-is what shows the congratulations screen.
+location and clears the others, and the 🎁 Treasure pill sits on that row.
+**The flag is optional** — leave it unticked and the whole list is scrambled,
+so the hunt ends wherever that publish's order finishes. Either way `/creator`
+states which order a publish will deal above the list, and the share sheet shows
+the order that was just dealt (with the end marked), so the ending is never a
+surprise. The end is walked to like any other stop (its own place, character,
+questions and key); clearing it is what shows the congratulations screen.
 
 ## The exported file states the order
 
@@ -193,12 +211,14 @@ game, so the file reads on its own:
 }
 ```
 
-It is the hunt's **authored** order (`buildHuntOrder`), with `isEnd` on the last
-stop — the treasure, or the last location when nothing is tagged. It is
-descriptive, not authoritative: the order of record is each location's own
-`order` field, so the importer ignores `order` entirely and a hand-edited or
-stale block cannot desynchronise a hunt. Each joining team is still dealt its
-own shuffled order of the walkable locations.
+It is the order this publish **dealt** — read from `resolveRoute`, the same
+function play uses, so the file and the game cannot disagree — with `isEnd` on
+the last stop. The `order` block itself is descriptive: the order of record is
+`game.route` (and each location's own `order` field), so the importer ignores
+`order` entirely and a hand-edited or stale block cannot desynchronise a hunt.
+Re-importing a file and publishing it deals a new order, because every publish
+does. A round already in progress keeps the order it joined with, so a team can
+briefly be walking an order older than the latest file.
 
 ## The end of the hunt
 

@@ -1,7 +1,7 @@
 import type { HuntCharacter, HuntGame, HuntProgress } from '../types/hunt';
 
 /**
- * Team routes for the treasure hunt, pure and storage-free.
+ * Routes for the treasure hunt, pure and storage-free.
  *
  * The unit is a **location**, and a location is authored complete: where it is,
  * the clue that leads to it (H), the character that appears there and plays its
@@ -10,22 +10,29 @@ import type { HuntCharacter, HuntGame, HuntProgress } from '../types/hunt';
  * only thing the hunt deals.
  *
  *     authored locations            L1, L2 (treasure), L3
- *     one team's dealt route        L3  →  L1  →  L2
+ *     the order a publish deals     L3  →  L1  →  L2
  *     handed over when the hunt opens      H3, C3, K3
  *     handed over when Q3 is cleared       H1, C1, K1
  *     handed over when Q1 is cleared       H2, C2, K2
  *     cleared Q2 at the treasure           congratulations
  *
- * Two rules shape that.
+ * Three rules shape that.
  *
- * 1. **The order is dealt per team.** Each joining device (the unit
- *    `HuntProgress` tracks) is dealt its own shuffled order of the hunt's
- *    walkable locations, so teams never walk the same path: shadowing another
- *    team takes you somewhere your route does not go, and the gate records
- *    nothing there. The treasure location is never dealt — it is appended last,
- *    so every team's hunt finishes where the treasure waits.
+ * 1. **The deal happens when the hunt is published**, not when a team joins:
+ *    every press of Publish / Save Changes deals a fresh order
+ *    (`dealPublishedRoute`) and stores it on the hunt, so the route travels with
+ *    the share link, the share code and the exported file. Publishing the same
+ *    hunt again hands out a different route. A hunt that tags a location as the
+ *    treasure holds it back and shuffles every other location; a hunt that tags
+ *    none is shuffled whole, so the last location of the dealt order is where
+ *    that hunt ends.
  *
- * 2. **A stop is exactly the location the creator wrote.** Its coordinates,
+ * 2. **A round is never reshuffled under a team.** `resolveRoute` reads the
+ *    order the team joined with first (`HuntProgress.route`), so a creator
+ *    re-publishing mid-hunt cannot move the stops a team is walking; the deal
+ *    the hunt now carries applies to teams that join afterwards.
+ *
+ * 3. **A stop is exactly the location the creator wrote.** Its coordinates,
  *    radius, hint, character, questions and key are all its own. The dealt order
  *    changes only *when* a team gets them: the reveal that ends a stop hands over
  *    the next location's hint + character + key, and the hunt opens with those
@@ -48,13 +55,18 @@ export function treasureLocation(characters: HuntCharacter[]): HuntCharacter | n
   return characters.find(isTreasureStop) ?? null;
 }
 
+/** Locations in authored order — `order` ascending, which is the order of record. */
+function authoredOrder(characters: HuntCharacter[]): HuntCharacter[] {
+  return [...characters].sort((a, b) => a.order - b.order);
+}
+
 /**
  * The hunt's walkable locations, in authored order — every location except the
- * treasure. The treasure is never shuffled: it is what every team's route ends
- * on, so `buildRoute` deals these and `resolveRoute` appends it.
+ * treasure. The treasure is never shuffled: a publish holds it back and deals
+ * it last, so it is what every team's route ends on.
  */
 export function walkableStops(characters: HuntCharacter[]): HuntCharacter[] {
-  return characters.filter(character => !isTreasureStop(character));
+  return authoredOrder(characters).filter(character => !isTreasureStop(character));
 }
 
 /** Uniform integer in [0, max) — crypto-backed, with a fallback for old engines. */
@@ -98,50 +110,86 @@ export function buildRoute(characters: HuntCharacter[]): string[] {
 }
 
 /**
- * The locations this team plays, in the order they play them: the dealt stops
- * (their stored order when one exists, the authored order for progress saved
- * before routes existed, plus any location the creator added after the deal),
- * then the treasure. Stale or duplicated IDs in a stored route are ignored, and
- * a treasure found in one is dropped — it is always appended last.
+ * Deals the order a publish hands out: the hunt's walkable locations shuffled,
+ * with the treasure — when a location is tagged as it — held back for last. A
+ * reshuffle makes sure the dealt order is not simply the authored order again.
+ *
+ * When **no** location is tagged, `walkableStops` is every location, so the
+ * whole list is shuffled and the last location of the dealt order is where that
+ * hunt ends. A deal therefore always has an end: the tagged treasure, or
+ * whichever location the shuffle happened to finish on.
+ *
+ * Called once per publish (`normaliseGame`), so pressing Publish / Save Changes
+ * again deals a new order and shares that one.
+ */
+export function dealPublishedRoute(characters: HuntCharacter[]): string[] {
+  const deal = buildRoute(characters);
+  const treasure = treasureLocation(characters);
+  return treasure ? [...deal, treasure.id] : deal;
+}
+
+/** Resolves dealt ids to locations, dropping stale, duplicate and treasure ids. */
+function stopsFromIds(
+  ids: readonly string[] | undefined,
+  byId: Map<string, HuntCharacter>
+): HuntCharacter[] {
+  const stops: HuntCharacter[] = [];
+  const seen = new Set<string>();
+  for (const id of ids ?? []) {
+    const character = byId.get(id);
+    if (!character || seen.has(character.id) || isTreasureStop(character)) continue;
+    stops.push(character);
+    seen.add(character.id);
+  }
+  return stops;
+}
+
+/**
+ * The locations a team plays, in the order they play them. Three sources, in
+ * order of authority:
+ *
+ *   1. `progress.route` — the order that team joined with, kept for the whole
+ *      round so a re-publish mid-hunt never moves a stop under their feet;
+ *   2. `game.route` — the order this publish dealt, which travels in the share
+ *      link, the share code and the exported file;
+ *   3. the authored order — a hunt saved before routes existed.
+ *
+ * Stale, duplicated or treasure ids in either route are ignored, a location the
+ * creator added after the deal still gets walked (in authored order, ahead of
+ * the end), and the treasure — when there is one — closes the route.
  */
 function dealStops(
-  game: Pick<HuntGame, 'characters'>,
+  game: Pick<HuntGame, 'characters' | 'route'>,
   progress: Pick<HuntProgress, 'route'> | null
 ): HuntCharacter[] {
   const treasure = treasureLocation(game.characters);
   const walkable = walkableStops(game.characters);
   const byId = new Map(game.characters.map(character => [character.id, character]));
 
-  const stored: HuntCharacter[] = [];
-  const seen = new Set<string>();
-  for (const id of progress?.route ?? []) {
-    const character = byId.get(id);
-    if (!character || seen.has(character.id) || isTreasureStop(character)) continue;
-    stored.push(character);
-    seen.add(character.id);
-  }
+  const fromProgress = stopsFromIds(progress?.route, byId);
+  const fromGame = stopsFromIds(game.route, byId);
+  const stops =
+    fromProgress.length > 0 ? fromProgress : fromGame.length > 0 ? fromGame : [...walkable];
 
-  const stops = stored.length > 0 ? stored : [...walkable];
-  // Locations the creator added after this team joined still get walked — they
-  // join in authored order, ahead of the treasure.
+  // Locations the creator added after the deal still get walked — they join in
+  // authored order, ahead of the end.
   const known = new Set(stops.map(character => character.id));
   const added = walkable.filter(character => !known.has(character.id));
-  // The treasure closes every route: it is the location where the hunt ends,
-  // so it is appended rather than dealt. A hunt with no treasure (authored
-  // before it was required) simply ends on its last dealt stop.
+  // The treasure closes every route: it is the location where the hunt ends, so
+  // it is appended rather than dealt. A hunt with no tagged treasure simply ends
+  // on the last location its dealt order produced.
   return treasure ? [...stops, ...added, treasure] : [...stops, ...added];
 }
 
 /**
- * The route a team actually plays: the hunt's locations in this team's dealt
- * order, each one exactly as the creator authored it — its own coordinates,
- * radius, clue, character (name, subtitle, dialogue, asset, banner), questions
- * and key — with the treasure location last.
+ * The route a team actually plays: the hunt's locations in this team's order,
+ * each one exactly as the creator authored it — its own coordinates, radius,
+ * clue, character (name, subtitle, dialogue, asset, banner), questions and key.
  *
  * Nothing is rewritten here, and that is the point: a location is the unit of
  * the hunt, so whatever the radar points at, the question gate asks and the
- * reveal plays all come from the same authored entry. What a team is handed
- * and when is the hand-over's job, not the route's: the reveal that ends a stop
+ * reveal plays all come from the same authored entry. What a team is handed and
+ * when is the hand-over's job, not the route's: the reveal that ends a stop
  * gives the next stop's clue + character + key, and the hunt opens with those
  * three for the team's first location (see `context/HuntContext`).
  *
@@ -149,7 +197,7 @@ function dealStops(
  * player's live position is not part of a route at all, so it is not passed in.
  */
 export function resolveRoute(
-  game: Pick<HuntGame, 'characters'>,
+  game: Pick<HuntGame, 'characters' | 'route'>,
   progress: Pick<HuntProgress, 'route'> | null
 ): HuntCharacter[] {
   return dealStops(game, progress);
