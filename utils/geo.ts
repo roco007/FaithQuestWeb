@@ -73,6 +73,40 @@ export function formatDistance(meters: number): string {
 }
 
 /**
+ * Moves a location along a compass bearing, for anchoring something a short
+ * distance from the player rather than on a creator-authored pin. Flat-earth
+ * approximation, which is exact enough at these distances.
+ */
+export function offsetLocation(
+  from: LocationCoordinates,
+  bearingDeg: number,
+  meters: number
+): LocationCoordinates {
+  const bearingRad = degreesToRadians(bearingDeg);
+  const latitude = from.latitude + (meters * Math.cos(bearingRad)) / 111320;
+  const metersPerDegLng = 111320 * Math.cos(degreesToRadians(from.latitude));
+  const longitude = from.longitude + (meters * Math.sin(bearingRad)) / (metersPerDegLng || 1);
+  return { latitude, longitude };
+}
+
+/** How far in front of the player the character that greets them stands. */
+export const MEETING_DISTANCE_METERS = 3.2;
+
+/**
+ * The **opening meeting**: where a location's character stands when a team joins
+ * the hunt, anchored to the player instead of to its own pin.
+ *
+ * A fixed distance along a fixed bearing, so the character lands squarely in
+ * frame wherever the team happens to be standing — the one moment in a hunt
+ * that is not anchored on a creator-authored coordinate. It is the first route
+ * stop's character showing its clue and key, which is why it needs no pin: the
+ * team is not there yet, so there is nothing to walk to.
+ */
+export function meetingAnchor(from: LocationCoordinates): LocationCoordinates {
+  return offsetLocation(from, 0, MEETING_DISTANCE_METERS);
+}
+
+/**
  * Evaluates proximity state between player and landmark target.
  */
 export function evaluateProximity(

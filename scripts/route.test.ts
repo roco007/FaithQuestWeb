@@ -14,7 +14,9 @@
  *   - the treasure is dealt last, so every route finishes where the treasure is;
  *   - nothing stands with the player: no re-anchoring, no key-less stop;
  *   - the exported file states the hunt's order, START first and the stop the
- *     game must end on last (see section 12).
+ *     game must end on last (see section 12);
+ *   - the opening meeting anchors the first location's character to the player,
+ *     not to its pin, so it appears wherever the team joins (section 16).
  */
 import assert from 'node:assert/strict';
 import {
@@ -26,6 +28,7 @@ import {
   resolveRoute,
 } from '../utils/huntRoute';
 import { buildHuntExport, buildHuntOrder } from '../services/huntFile';
+import { meetingAnchor, MEETING_DISTANCE_METERS, calculateHaversineDistance } from '../utils/geo';
 import type { HuntCharacter, HuntGame } from '../types/hunt';
 
 const make = (id: string, order: number, extra: Partial<HuntCharacter> = {}): HuntCharacter => ({
@@ -348,6 +351,36 @@ assert.equal(
   dealtOrder.stops[dealtOrder.stops.length - 1].isEnd,
   true,
   'with the stop the hunt ends on marked last'
+);
+
+// 16) The opening meeting: the first route stop's character greets the team
+//     wherever they join, so its anchor is the player — a fixed distance ahead —
+//     and never the stop's own pin (which may be kilometres away).
+const meetingStop = resolved[0];
+for (const player of [
+  { latitude: 19.3778, longitude: 72.8162 }, // standing on the stop itself
+  { latitude: 19.4, longitude: 72.86 }, // ~5 km away
+  { latitude: 51.5072, longitude: -0.1276 }, // the other side of the planet
+]) {
+  const anchor = meetingAnchor(player);
+  assert.ok(
+    Math.abs(calculateHaversineDistance(player, anchor) - MEETING_DISTANCE_METERS) < 0.05,
+    `the character stands ${MEETING_DISTANCE_METERS}m in front of the player`
+  );
+  assert.ok(
+    anchor.latitude > player.latitude && Math.abs(anchor.longitude - player.longitude) < 1e-9,
+    'anchored due north of the player — its own position, not a stop\'s'
+  );
+}
+const farPlayer = { latitude: 19.4, longitude: 72.86 };
+assert.ok(
+  calculateHaversineDistance(farPlayer, meetingStop) > 1000,
+  'the stop itself is far away, and the meeting ignores that'
+);
+assert.notDeepEqual(
+  meetingAnchor(farPlayer),
+  { latitude: meetingStop.latitude, longitude: meetingStop.longitude },
+  'the anchor is the player\'s position, never the stop\'s pin'
 );
 
 console.log(

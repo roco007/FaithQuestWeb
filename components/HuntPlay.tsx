@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Radar, MapPin, Compass, Lock, PartyPopper, Camera } from 'lucide-react';
 import { useHunt, DiscoverResult } from '../context/HuntContext';
 import { useHuntRadar } from '../hooks/useHuntRadar';
@@ -68,6 +68,24 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
   const [celebration, setCelebration] = useState(false);
   /** Whether the fullscreen AR camera view is open. */
   const [arOpen, setArOpen] = useState(false);
+  /**
+   * The **opening meeting**: while true, the first location's character greets
+   * the team wherever they joined — clue and key in hand, its video playing —
+   * and the camera opens on its own. It is a greeting, not a discovery: the stop
+   * is still walked to on foot. Cleared once dismissed, so it happens once per
+   * round; leaving the camera without dismissing it leaves it pending.
+   */
+  const [meetingPending, setMeetingPending] = useState(
+    () => (activeProgress?.discoveredCharacterIds.length ?? 0) === 0
+  );
+  /** Auto-open the camera for the meeting exactly once, however the round starts. */
+  const meetingAutoOpenedRef = useRef(false);
+
+  useEffect(() => {
+    if (meetingAutoOpenedRef.current || !meetingPending || !currentCharacter) return;
+    meetingAutoOpenedRef.current = true;
+    setArOpen(true);
+  }, [meetingPending, currentCharacter]);
 
   /**
    * The character on the congratulations screen: the one the creator chose next
@@ -427,12 +445,17 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
         </div>
       </Modal>
 
-      {/* Fullscreen geo-AR view — the sighting, the key entry and the
-          character's spoken answer all happen on this frame. */}
+      {/* Fullscreen geo-AR view — the opening meeting, then the sighting, the key
+          entry and the character's spoken answer, all on this frame. */}
       <HuntARCamera
         open={arOpen}
         onClose={() => setArOpen(false)}
         onDiscoveryComplete={handleDiscoveryComplete}
+        meetingCharacter={meetingPending ? currentCharacter : null}
+        onMeetingComplete={() => {
+          setMeetingPending(false);
+          setArOpen(false);
+        }}
       />
     </div>
   );

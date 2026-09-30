@@ -368,6 +368,10 @@ export function parseHuntGameJson(input: string): ImportedHunt {
     createdAt: timestamp(payload.createdAt),
     updatedAt: timestamp(payload.updatedAt),
     endAnnouncement: text(payload.endAnnouncement).trim(),
+    // The character shown with the announcement. Imported with the hunt so
+    // reopening a file does not force the creator to pick it again before
+    // publishing.
+    endCharacterAssetId: text(payload.endCharacterAssetId).trim() || null,
     characters: payload.characters.map(normaliseImportedCharacter),
   };
 }

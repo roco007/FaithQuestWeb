@@ -230,18 +230,43 @@ The character is any camera roster entry, so a celebration clip such as
 treasure location. Hunts shared before the end character existed fall back to
 the treasure location's own character, so a round can always finish.
 
+## The opening meeting
+
+When a team joins, the **first location's character appears with them** —
+wherever they are standing, whatever that location's coordinates are. The AR
+camera opens on its own and runs a `meeting` phase (`HuntARCamera`):
+
+- the character is anchored to the **player**, not to its own pin
+  (`meetingAnchor` in `utils/geo.ts`: a fixed 3.2 m due north of the live
+  position), so it is framed dead ahead every time. This is the one moment in a
+  hunt with no creator-authored anchor, and that is the point — the team has not
+  walked there yet, so there is nothing to anchor to;
+- it hands over **its own location's clue and key** (H + K), spoken aloud with
+  `speakClue` exactly like a reveal, and **its video plays** if it is a cutout
+  roster character;
+- no key is presented and **no questions are asked** — the meeting records
+  nothing. The stop is still walked to: inside its radius, its key presented and
+  its questions answered is what completes it.
+
+"Start walking" (or backing out of the camera) ends the meeting; it is shown
+once per round, and reopening the camera before dismissing it greets the team
+again. Everything after it is unchanged: each stop asks its own questions and
+the reveal hands over the next location's clue, character and key, until the
+final stop, whose questions end the hunt on the congratulations screen with the
+End-of-Hunt Character.
+
 ## Clues and keys stay on screen
 
 Two things the player must never have to remember or hunt for:
 
 - **The clue ahead.** The team is always holding the clue for the stop they are
-  walking to: it arrives with the hunt's opening hand-over (first stop) or with
-  the reveal at the stop before it, so it is readable the moment it is given —
-  on the `/games` active-hunt card and in `HuntPlay` — rather than waiting for a
-  discovery radius. Distance and bearing stay behind the explicit location check
-  until the player is inside the discovery zone, and locations beyond the team's
-  next stay anonymous in the route list, so strict visibility on *proximity* is
-  unchanged.
+  walking to: it arrives with the opening meeting (first stop) or with the
+  reveal at the stop before it, so it is readable the moment it is given — on
+  the meeting's own panel, on the `/games` active-hunt card and in `HuntPlay` —
+  rather than waiting for a discovery radius. Distance and bearing stay behind
+  the explicit location check until the player is inside the discovery zone, and
+  locations beyond the team's next stay anonymous in the route list, so strict
+  visibility on *proximity* is unchanged.
 - **The key in hand.** A location's key opens that location, and it arrives one
   stop early — so what is on screen is always the key for the walk ahead.
   `components/KeyInHand.tsx` pins it to the screen: the ribbon under the hunt
