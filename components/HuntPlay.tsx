@@ -65,42 +65,9 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
   const { activeGame, activeProgress, activeRoute, currentCharacter } = useHunt();
   const radar = useHuntRadar();
 
-  /** The character clip of this team's first location, shown as a preview. */
-  const firstStopAssetId = activeRoute[0]?.characterAssetId ?? null;
-
   const [celebration, setCelebration] = useState(false);
   /** Whether the fullscreen AR camera view is open. */
   const [arOpen, setArOpen] = useState(false);
-  /**
-   * Round-start camera check: the clip belonging to the team's first location,
-   * so the round opens with the character they are walking to next — plus its
-   * hint and the key that opens it, both handed over before anything is walked.
-   * It doubles as proof this device renders character video — the same asset the
-   * AR camera composites over the live feed.
-   */
-  const [startClipSrc, setStartClipSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    const discoveredCount = activeProgress?.discoveredCharacterIds.length ?? 0;
-    if (!firstStopAssetId || discoveredCount > 0) {
-      setStartClipSrc(null);
-      return;
-    }
-    let mounted = true;
-    loadCharacterAssets()
-      .then(assets => {
-        if (!mounted) return;
-        const asset = assets.find(candidate => candidate.id === firstStopAssetId);
-        setStartClipSrc(asset?.kind === 'video' ? asset.src : null);
-      })
-      .catch(loadError => {
-        console.warn('Could not load the round-start clip:', loadError);
-        if (mounted) setStartClipSrc(null);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [firstStopAssetId, activeProgress]);
 
   /**
    * The character on the congratulations screen: the one the creator chose next
@@ -241,51 +208,6 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
       {/* The key the player is holding, on screen in every state of the hunt —
           out of range, in range, on the camera frame and after the last find. */}
       <KeyInHand />
-
-      {/* --- Round start: first location + camera check --------------------
-          The team's first package is already in hand before anything is
-          walked: the first location's hint (below, in the target card), its
-          character (named here, with its clip when it has one) and its key (in
-          the bar above). The clip doubles as the device check — if it renders
-          and the AR camera shows the live feed, the team is ready to walk. */}
-      {!isComplete && foundCount === 0 && currentCharacter && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <span className="sectionLabel">Before you start — camera check</span>
-          <p className="cardSubtitle" style={{ marginTop: 6 }}>
-            Handed to you before you take a step: the clue to your first location, the character
-            you will meet there and the key that opens it. Open the AR camera to confirm this
-            device shows the live feed — then follow the clue to{' '}
-            <strong>{currentCharacter.name}</strong> and present the key when you arrive.
-          </p>
-          {startClipSrc && (
-            <video
-              src={startClipSrc}
-              autoPlay
-              muted
-              loop
-              playsInline
-              aria-label="Preview of the character waiting at your first location"
-              style={{
-                display: 'block',
-                width: '100%',
-                maxHeight: 260,
-                objectFit: 'contain',
-                borderRadius: 12,
-                background: '#000',
-                marginTop: 12,
-              }}
-            />
-          )}
-          <button
-            type="button"
-            className="btnGhost"
-            style={{ marginTop: 12, width: '100%' }}
-            onClick={() => setArOpen(true)}
-          >
-            <Camera size={16} /> Open AR camera — check your feed
-          </button>
-        </div>
-      )}
 
       {isComplete || !currentCharacter ? (
         <div className="card playComplete">
