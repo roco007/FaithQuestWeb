@@ -190,18 +190,37 @@ function dealStops(
  * plays when they are let through. So walking a route, a team meets each
  * location's character one step ahead of the place they are standing in, which
  * is what makes the hand-over read as "this character is sending you to its own
- * location". The last stop has no next location, so its own character stands
- * there.
+ * location".
+ *
+ * The last stop is where that rule runs out: there is no next location, only the
+ * end of the hunt. The figure standing there is the **end-of-hunt character** —
+ * the one the creator chose to appear with the End-of-Hunt Announcement — so the
+ * walk to the treasure ends on the character that is about to congratulate the
+ * team, instead of the treasure location's own figure reappearing, which is the
+ * very character that just handed over the last clue. Its clip is held on its
+ * first frame while the team walks in and types the key, and plays when the key
+ * is accepted.
+ *
+ * The end-of-hunt character is a roster entry rather than a location, so what is
+ * returned is the stop's own entry re-pointed at it: only what a *character*
+ * needs (the asset, the procedural type) is read off the result, and the roster
+ * supplies the real name and accent when it renders. A hunt with no end-of-hunt
+ * character to show — one shared before that choice existed — keeps the old
+ * behaviour and stands the stop's own character there.
  *
  * Returns null for a stop that is not on the route.
  */
 export function characterMetAt(
   route: HuntCharacter[],
-  stopId: string
+  stopId: string,
+  endCharacterAssetId?: string | null
 ): HuntCharacter | null {
   const index = route.findIndex(character => character.id === stopId);
   if (index === -1) return null;
-  return route[index + 1] ?? route[index];
+  const next = route[index + 1];
+  if (next) return next;
+  if (!endCharacterAssetId) return route[index];
+  return { ...route[index], characterAssetId: endCharacterAssetId };
 }
 
 /**

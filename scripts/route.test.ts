@@ -387,8 +387,12 @@ assert.notDeepEqual(
 
 // 17) Who a team meets at a stop: the stop owns the place, the character met on
 //     it is the next location's — the one whose clue is handed over when the
-//     gate is passed. The last stop has no next location, so its own character
-//     stands there.
+//     gate is passed. The last stop has no next location, so the end-of-hunt
+//     character stands there instead — the one that appears with the
+//     End-of-Hunt Announcement, and not the location's own figure all over
+//     again (that one has just handed over the last clue). Without one to show —
+//     a hunt shared before that choice existed — the stop's own character stands
+//     there, as it always did.
 // Index-based, so this holds for whatever order the deal produced.
 for (let i = 0; i < resolved.length - 1; i++) {
   assert.equal(
@@ -398,12 +402,30 @@ for (let i = 0; i < resolved.length - 1; i++) {
   );
 }
 const lastStop = resolved[resolved.length - 1];
+const END_CHARACTER = 'found-hidden-treasure';
+const metAtLast = characterMetAt(resolved, lastStop.id, END_CHARACTER) as HuntCharacter;
 assert.equal(
-  characterMetAt(resolved, lastStop.id)?.id,
-  lastStop.id,
-  'the last stop has no next location, so its own character stands there'
+  metAtLast.characterAssetId,
+  END_CHARACTER,
+  'the last stop stands the end-of-hunt character, not the one that just handed over'
 );
-assert.equal(characterMetAt(resolved, 'GONE'), null, 'a stop off the route meets nobody');
+assert.notEqual(
+  metAtLast.characterAssetId,
+  lastStop.characterAssetId,
+  'so the figure on the frame actually changes for the last walk'
+);
+assert.equal(metAtLast.id, lastStop.id, 'it is still met at the treasure location itself');
+assert.equal(
+  characterMetAt(resolved, resolved[0].id, END_CHARACTER)?.id,
+  resolved[1].id,
+  'an end-of-hunt character never displaces a real next location'
+);
+assert.equal(
+  characterMetAt(resolved, lastStop.id)?.characterAssetId,
+  lastStop.characterAssetId,
+  'with no end-of-hunt character chosen, the stop\u2019s own character stands there'
+);
+assert.equal(characterMetAt(resolved, 'GONE', END_CHARACTER), null, 'a stop off the route meets nobody');
 
 // The gate and the character are different entries: arriving at a stop, its own
 // key and questions open it, and the character met there is the next location's —

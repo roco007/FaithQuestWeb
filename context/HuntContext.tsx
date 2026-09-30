@@ -31,8 +31,9 @@ export interface DiscoverResult {
   /**
    * The character the team met at the stop they just cleared — the *next*
    * location's character, which is what plays its video and hands over
-   * the clue. The stop itself (its key, questions and place) is the entry
-   * before it in the route.
+   * the clue, or the end-of-hunt character on the stop that finishes the hunt.
+   * The stop itself (its key, questions and place) is the entry before it in
+   * the route.
    */
   character: HuntCharacter;
   isFinal: boolean;
@@ -60,8 +61,8 @@ interface HuntContextType {
    * The character standing at `currentCharacter`'s pin: the **next** location's
    * character, since a stop owns its place (pin, radius, clue, key, questions)
    * while the figure on it is the one that hands over the clue for the place it
-   * belongs to. The last stop's own character stands there
-   * (see `characterMetAt`).
+   * belongs to. On the last stop there is no next location, so the end-of-hunt
+   * character stands there instead (see `characterMetAt`).
    */
   metCharacter: HuntCharacter | null;
   isLoading: boolean;
@@ -372,8 +373,10 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return {
         // The character they met, not the stop they walked to: that is the one
         // that plays its video and hands over the next clue. At the last
-        // stop `nextUp` is null, so it is the stop's own character.
-        character: characterMetAt(activeRoute, nextCharacter.id) ?? nextCharacter,
+        // stop `nextUp` is null, so it is the end-of-hunt character.
+        character:
+          characterMetAt(activeRoute, nextCharacter.id, activeGame.endCharacterAssetId) ??
+          nextCharacter,
         isFinal: isComplete,
         nextCharacter: nextUp,
         game: activeGame,
@@ -392,11 +395,17 @@ export const HuntProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * Who is standing at the current stop's pin — the next location's character,
    * so the reveal (and the video it plays) belongs to the place the hand-over
-   * is sending the team to, not to the place they are standing in.
+   * is sending the team to, not to the place they are standing in. On the last
+   * stop, where there is no next location, it is the end-of-hunt character: the
+   * team walks the final stretch to the character that will congratulate them,
+   * rather than to the same figure that just handed them the last clue.
    */
   const metCharacter = useMemo(
-    () => (currentCharacter ? characterMetAt(activeRoute, currentCharacter.id) : null),
-    [activeRoute, currentCharacter]
+    () =>
+      currentCharacter
+        ? characterMetAt(activeRoute, currentCharacter.id, activeGame?.endCharacterAssetId)
+        : null,
+    [activeRoute, currentCharacter, activeGame?.endCharacterAssetId]
   );
 
   const value = useMemo<HuntContextType>(

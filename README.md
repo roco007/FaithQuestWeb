@@ -188,15 +188,18 @@ presents that location's key and answers that location's questions — and the
 figure on the pin is the **next** location's character: the one whose own clue
 and key are handed over the moment the gate opens, and whose video plays when
 they are let through. So the hand-over always reads "this character is sending
-you to its own location". The last stop has no next location, so its own
-character stands there. Traced over the three-location hunt in
+you to its own location". The last stop is where that rule runs out: there is
+no next location, only the end of the hunt, so the **End-of-Hunt Character**
+stands there — the team walks the final stretch to the character that is about
+to congratulate them, not to the same figure that just handed over the last
+clue. Traced over the three-location hunt in
 `public/changesProposed/`:
 
 | the team stands at | the gate (this location) | the character met | handed over |
 | --- | --- | --- | --- |
 | Loc2 | key `XJPYV6` + `q_munojni5_22`, `q_munojrn8_42` | **Loc 3** — guardian, video `video-test-transparent`, *"welcome to loc 3"* | *"Hint That Leads Loc 3"* + key `8PDSQZ` |
 | Loc 3 | key `8PDSQZ` + `q_munojni5_23`, `q_munojrn8_43` | **Loc1** — flame, *"welcome to loc 1"* | *"hinnt leads to lead 1"* + key `CC2VE5` |
-| Loc1 (end) | key `CC2VE5` + `q_munojni5_21`, `q_munojrn8_41` | Loc1's own flame | congratulations — End-of-Hunt Character |
+| Loc1 (end) | key `CC2VE5` + `q_munojni5_21`, `q_munojrn8_41` | **End-of-Hunt Character** (the creator's pick) | nothing — its clip plays, then *Finish hunt* |
 
 The opening meeting is the one exception: it greets with the **first stop's own**
 character, because that is the location whose H + C + K is being handed over
@@ -245,13 +248,20 @@ briefly be walking an order older than the latest file.
 
 ## The end of the hunt
 
-The congratulations screen is the **End-of-Hunt Announcement** plus the
-character chosen beside it (**End-of-Hunt Character**), both authored in Game
-Details on `/creator` and both required — publishing without them is refused.
-The character is any camera roster entry, so a celebration clip such as
-`found-hidden-treasure` plays alongside the announcement when a team clears the
-treasure location. Hunts shared before the end character existed fall back to
-the treasure location's own character, so a round can always finish.
+The end of a hunt plays out in two beats. Accepting the **last** key is the
+video beat: the **End-of-Hunt Character** — the roster entry chosen beside the
+**End-of-Hunt Announcement** in Game Details on `/creator`, both required, as
+publishing without them is refused — has been standing on that pin the whole
+walk, held on its first frame, and now plays its clip full-frame with no
+hand-over card over it. *Finish hunt* is the message beat: the camera closes and
+the congratulations screen shows the announcement and the character's name, with
+no second playback — the clip plays once, on the frame, and only there. Hunts
+shared before the end character existed fall back to the treasure location's own
+character, so a round can always finish.
+
+A celebration clip such as `found-hidden-treasure` therefore plays at the last
+find rather than on the page, and the page is the only place the announcement
+text ever appears.
 
 ## The opening meeting
 
@@ -264,9 +274,8 @@ camera opens on its own and runs a `meeting` phase (`HuntARCamera`):
   position), so it is framed dead ahead every time. This is the one moment in a
   hunt with no creator-authored anchor, and that is the point — the team has not
   walked there yet, so there is nothing to anchor to;
-- it hands over **its own location's clue and key** (H + K), spoken aloud with
-  `speakClue` exactly like a reveal, and **its video plays** if it is a cutout
-  roster character;
+- it hands over **its own location's clue and key** (H + K) on screen, exactly
+  like a reveal, and **its video plays** if it is a cutout roster character;
 - no key is presented and **no questions are asked** — the meeting records
   nothing. The stop is still walked to: inside its radius, its key presented and
   its questions answered is what completes it.
@@ -275,8 +284,8 @@ camera opens on its own and runs a `meeting` phase (`HuntARCamera`):
 once per round, and reopening the camera before dismissing it greets the team
 again. Everything after it is unchanged: each stop asks its own questions and
 the reveal hands over the next location's clue, character and key, until the
-final stop, whose questions end the hunt on the congratulations screen with the
-End-of-Hunt Character.
+final stop, whose questions are followed by the End-of-Hunt Character playing
+its clip and *Finish hunt* opening the congratulations screen.
 
 ## Clues and keys stay on screen
 

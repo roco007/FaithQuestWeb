@@ -6,7 +6,7 @@ import { useHunt, DiscoverResult } from '../context/HuntContext';
 import { useHuntRadar } from '../hooks/useHuntRadar';
 import { formatDistance } from '../utils/geo';
 import { characterMetAt } from '../utils/huntRoute';
-import { loadCharacterAssets, type CharacterAssetKind } from '../services/characterAssets';
+import { loadCharacterAssets } from '../services/characterAssets';
 import { Modal } from './Modal';
 import { HuntARCamera } from './HuntARCamera';
 import { KeyInHand } from './KeyInHand';
@@ -89,21 +89,20 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
   }, [meetingPending, currentCharacter]);
 
   /**
-   * The character on the congratulations screen: the one the creator chose next
-   * to the End-of-Hunt Announcement, falling back to the treasure location's own
-   * character for hunts published before that choice existed. Only the roster
-   * entry is resolved here — the announcement itself is always the game's.
+   * The name of the character on the congratulations screen: the one the creator
+   * chose next to the End-of-Hunt Announcement, falling back to the treasure
+   * location's own character for hunts published before that choice existed.
+   *
+   * Only the name is resolved here. The end-of-hunt character is *played* on the
+   * AR camera frame the moment the last key is accepted, so the page has no
+   * media of its own — it carries the congratulations and nothing else.
    */
-  const [endCharacter, setEndCharacter] = useState<{
-    name: string;
-    src: string | null;
-    kind: CharacterAssetKind | null;
-  } | null>(null);
+  const [endCharacterName, setEndCharacterName] = useState<string | null>(null);
   useEffect(() => {
     const treasure = activeRoute[activeRoute.length - 1] ?? null;
     const wantedId = activeGame?.endCharacterAssetId || treasure?.characterAssetId || null;
     if (!wantedId) {
-      setEndCharacter(null);
+      setEndCharacterName(null);
       return;
     }
     let mounted = true;
@@ -111,57 +110,16 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
       .then(assets => {
         if (!mounted) return;
         const asset = assets.find(candidate => candidate.id === wantedId) ?? null;
-        setEndCharacter({
-          name: asset?.name ?? treasure?.name ?? '',
-          // 3D models have no player here; photos and clips render straight in.
-          src: asset && asset.kind !== 'model' ? asset.src : null,
-          kind: asset?.kind ?? null,
-        });
+        setEndCharacterName(asset?.name ?? treasure?.name ?? '');
       })
       .catch(loadError => {
         console.warn('Could not load the end-of-hunt character:', loadError);
-        if (mounted) setEndCharacter(null);
+        if (mounted) setEndCharacterName(null);
       });
     return () => {
       mounted = false;
     };
   }, [activeGame?.endCharacterAssetId, activeRoute]);
-
-  /** The end character's media, shared by the completion card and the modal. */
-  const endCharacterMedia = endCharacter?.src ? (
-    endCharacter.kind === 'video' ? (
-      <video
-        src={endCharacter.src}
-        autoPlay
-        muted
-        loop
-        playsInline
-        aria-label={endCharacter.name ? `End-of-hunt character: ${endCharacter.name}` : 'End-of-hunt character'}
-        style={{
-          display: 'block',
-          width: '100%',
-          maxHeight: 240,
-          objectFit: 'contain',
-          borderRadius: 12,
-          background: '#000',
-          marginTop: 12,
-        }}
-      />
-    ) : (
-      <img
-        src={endCharacter.src}
-        alt={endCharacter.name || 'End-of-hunt character'}
-        style={{
-          display: 'block',
-          width: '100%',
-          maxHeight: 240,
-          objectFit: 'contain',
-          borderRadius: 12,
-          marginTop: 12,
-        }}
-      />
-    )
-  ) : null;
 
   /**
    * The camera owns the whole discovery loop, so the only outcome this screen
@@ -234,10 +192,9 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
           <h2 className="victoryHeading" style={{ marginTop: 12 }}>
             Hunt complete!
           </h2>
-          {endCharacterMedia}
-          {endCharacter?.name && (
+          {endCharacterName && (
             <p className="sectionLabel" style={{ marginTop: 10 }}>
-              {endCharacter.name}
+              {endCharacterName}
             </p>
           )}
           <p className="victorySubtitle">{activeGame.endAnnouncement}</p>
@@ -414,7 +371,10 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
                       </div>
                       <div className={`routeSub${isDone ? ' routeClue' : ''}`}>
                         {isDone
-                          ? `Met ${characterMetAt(activeRoute, ch.id)?.name ?? ch.name}`
+                          ? // The last stop's figure is the end-of-hunt
+                            // character, whose name comes from the roster
+                            // rather than from the location.
+                            `Met ${(isEndStop ? endCharacterName : null) ?? characterMetAt(activeRoute, ch.id)?.name ?? ch.name}`
                           : isRevealed
                             ? ch.subtitle
                             : 'Hidden — undiscovered'}
@@ -431,10 +391,9 @@ export function HuntPlay({ onExit }: HuntPlayProps) {
       <Modal open={celebration} onClose={() => setCelebration(false)} title="Hunt complete!">
         <div className="victoryCard">
           <PartyPopper size={34} color="var(--amber)" />
-          {endCharacterMedia}
-          {endCharacter?.name && (
+          {endCharacterName && (
             <p className="sectionLabel" style={{ marginTop: 10 }}>
-              {endCharacter.name}
+              {endCharacterName}
             </p>
           )}
           <p className="victorySubtitle" style={{ marginTop: 12 }}>
