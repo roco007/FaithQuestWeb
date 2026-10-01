@@ -160,6 +160,17 @@ function RevealDetails({ result }: { result: DiscoverResult }) {
 }
 
 /**
+ * Seconds the opening meeting holds "Begin Hunt" back.
+ *
+ * The meeting is the one moment the whole hunt is explained: a character's
+ * greeting, its clue, the key just handed over and how to use it are all on
+ * screen at once, and "Begin Hunt" is the fastest thing to hit. The delay
+ * buys those few seconds of reading — and it only ever applies to the opening
+ * meeting, never to a stop that needs walking to.
+ */
+const START_WALK_DELAY_S = 10;
+
+/**
  * Fullscreen geo-AR view for the web hunt: the live rear-camera feed with the
  * animated 3D character composited at its geolocation, a focus reticle, and
  * off-screen direction guidance — the web port of `app/hunt/ar.tsx`.
@@ -230,6 +241,11 @@ export function HuntARCamera({
    * rewinding.
    */
   const [videoPaused, setVideoPaused] = useState(false);
+  /**
+   * Seconds left before the opening meeting's "Begin Hunt" button unlocks.
+   * Counts down only while the meeting is on screen; see `START_WALK_DELAY_S`.
+   */
+  const [startCountdown, setStartCountdown] = useState(START_WALK_DELAY_S);
   /** Deployment-owned roster resolved from the selected character's asset ID. */
   const [characterAssets, setCharacterAssets] = useState<CharacterAsset[]>([]);
   /** Bumped each time a character's clip (re)starts, to cue media assets. */
@@ -285,6 +301,14 @@ export function HuntARCamera({
    * clip playing on it — down with it.
    */
   const stopCharacter = currentCharacter ?? revealedStop;
+  /**
+   * Whether the opening meeting's "Begin Hunt" is live yet.
+   *
+   * Tied to the countdown reaching zero rather than to a bare timer, so the
+   * button can never be clickable while it still reads as waiting — and it only
+   * ever gates the meeting, never a stop that needs walking to.
+   */
+  const canStartWalking = startCountdown === 0;
   /**
    * The character on screen: whoever is met here. The meeting greets with the
    * first stop's own character; after that it is the next location's character
@@ -444,11 +468,11 @@ export function HuntARCamera({
   /** Bottom of the usable area: above the docked hint/chips (and key form). */
   const hudSafeBottomPx = Math.max(
     dims.height -
-      (phase === 'key'
-        ? KEY_PANEL_RESERVE_PX
-        : phase === 'quiz' || phase === 'meeting'
-          ? QUIZ_PANEL_RESERVE_PX
-          : BOTTOM_HUD_RESERVE_PX),
+    (phase === 'key'
+      ? KEY_PANEL_RESERVE_PX
+      : phase === 'quiz' || phase === 'meeting'
+        ? QUIZ_PANEL_RESERVE_PX
+        : BOTTOM_HUD_RESERVE_PX),
     hudSafeTopPx
   );
   /** What may be given to the dialogue while the model keeps a usable band. */
@@ -494,11 +518,11 @@ export function HuntARCamera({
     ? 0
     : bannerCardWanted
       ? Math.max(
-          topDialogueHeightPx,
-          phase === 'reveal' ? AR_COMBINED_CARD_FALLBACK_HEIGHT : AR_BANNER_CARD_FALLBACK_HEIGHT
-        ) +
-        AR_CARD_GAP +
-        8
+        topDialogueHeightPx,
+        phase === 'reveal' ? AR_COMBINED_CARD_FALLBACK_HEIGHT : AR_BANNER_CARD_FALLBACK_HEIGHT
+      ) +
+      AR_CARD_GAP +
+      8
       : Math.max(topDialogueHeightPx, AR_BUBBLE_FALLBACK_HEIGHT) + AR_BUBBLE_TAIL_GAP + 8;
   const topReservePx = Math.min(desiredTopReservePx, availableHeadroomPx);
   /**
@@ -628,6 +652,27 @@ export function HuntARCamera({
     }
     if (!meetingCharacter && phase === 'meeting') setPhase('hunting');
   }, [open, meetingCharacter, phase]);
+
+  /**
+   * Holds "Begin Hunt" back for the first seconds of the opening meeting.
+   *
+   * Keyed on a derived boolean rather than on `phase` itself, so the timer is
+   * built once per meeting rather than restarted by the re-renders that the
+   * meeting's own video and countdown cause — a dependency on the live value
+   * would reset the countdown to 10 every second and it would never elapse.
+   * Leaving the meeting (or closing the camera) clears the interval, and
+   * backing out then reopening greets the team with a full delay again, which
+   * matches "it greets you again on the next open".
+   */
+  const meetingOnScreen = open && phase === 'meeting';
+  useEffect(() => {
+    setStartCountdown(START_WALK_DELAY_S);
+    if (!meetingOnScreen) return;
+    const id = setInterval(() => {
+      setStartCountdown((seconds) => (seconds > 0 ? seconds - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [meetingOnScreen]);
 
   // Escape-to-close + body scroll lock, mirroring `Modal`.
   useEffect(() => {
@@ -947,9 +992,8 @@ export function HuntARCamera({
       return `At ${stopCharacter.name} — present your key below`;
     }
     if (phase === 'quiz' && stopCharacter) {
-      return `Key accepted — answer ${quizQuestions.length} question${
-        quizQuestions.length === 1 ? '' : 's'
-      } to open ${stopCharacter.name}`;
+      return `Key accepted — answer ${quizQuestions.length} question${quizQuestions.length === 1 ? '' : 's'
+        } to open ${stopCharacter.name}`;
     }
     if (cameraState === 'starting') return 'Starting camera…';
     if (cameraState === 'error') return 'Camera unavailable';
@@ -1213,15 +1257,28 @@ export function HuntARCamera({
               )}
               <button
                 type="button"
-                className="arRevealBtn arRevealContinue"
+                className={
+                  canStartWalking
+                    ? 'arRevealBtn arRevealContinue arRevealContinueReady'
+                    : 'arRevealBtn arRevealContinue arRevealContinueWaiting'
+                }
                 onClick={onMeetingComplete}
+                disabled={!canStartWalking}
               >
-                Start walking
-                <ChevronRight size={16} />
+                Begin Hunt
+                {canStartWalking ? (
+                  <ChevronRight size={16} />
+                ) : (
+                  /* The wait has to be legible, not just a button that will not
+                     press — a silent disabled control reads as a broken one. */
+                  <span className="arCountdown mono">{startCountdown}s</span>
+                )}
               </button>
             </div>
             <p className="arKeyHelper">
-              {`Follow the clue to ${activeCharacter.name} and present that key when you get there. Nothing is recorded until you arrive.`}
+              {canStartWalking
+                ? `Follow the clue to ${activeCharacter.name} and present that key when you get there. Nothing is recorded until you arrive.`
+                : `Take a moment to read the clue and the key — you can begin hunting in ${startCountdown}s.`}
             </p>
           </div>
         )}

@@ -119,6 +119,74 @@ belonging to a hunt already in progress can never silently replace what the
 player is playing. Declining is a no-op. If the invite is the hunt already being
 played, the dialog says so and just offers *Continue hunt*.
 
+## Joining checks location and camera first
+
+*Yes, join this hunt* does not join — it advances to a **device-permission
+checklist** (`components/JoinPreflight.tsx`), and only the checklist's own
+*Join the hunt* button calls `joinGame`. The dialog therefore has three steps:
+invite → checklist → hunt.
+
+Two permissions are on it because a hunt cannot run without them, and both fail
+*quietly* once refused: a denied GPS watch leaves the player walking around a map
+that never notices they have arrived at a discovery zone, and a denied camera
+leaves an AR view that never produces a frame. Neither failure announces itself,
+so both are asked for up front instead.
+
+How each is obtained (`hooks/useDevicePermissions.ts`):
+
+- **Precise location** — `getCurrentPosition` with `enableHighAccuracy: true`,
+  which is what makes Android offer the precise/coarse choice. The *accuracy of
+  the fix that comes back* is how the choice is detected: a fix coarser than
+  100 m is Android's approximate mode, and the row says so rather than quietly
+  accepting it (a 25 m discovery zone cannot be entered on an approximate fix).
+  A timeout or unavailable position is treated as retryable, never as a denial
+  the player never gave.
+- **Camera** — a `getUserMedia` probe with the same rear-facing constraint the
+  AR view uses, so a grant here is a grant there. The tracks are stopped the
+  moment they open: the camera light must not stay on for a player who is only
+  walking a map.
+
+Two details that keep it honest:
+
+- **State is seeded from the Permissions API**, so a returning player who
+  allowed location weeks ago is not asked again, and `change` events keep the
+  rows honest if they revoke it from browser settings while the app is open.
+- **Nothing is requested on mount.** Browsers only raise a geolocation or camera
+  prompt inside a user gesture, so an automatic request would be silently
+  dropped and the checklist would sit on "Needed" forever. Each row's *Allow*
+  button is the gesture that raises its own prompt.
+
+### A blocked permission cannot be re-prompted
+
+Once an origin is blocked, `getCurrentPosition` / `getUserMedia` reject
+**immediately and silently, forever** — no code path brings the prompt back, so a
+blocked row has to *say* so rather than keep offering a retry as if it were the
+whole answer.
+
+The Permissions API is the only thing that distinguishes the two cases, because
+the refusal error is identical either way:
+
+| `permissions.query` | Meaning | What the row offers |
+| ------------------- | ------- | ------------------- |
+| `prompt` | the request would still raise a dialog | **Try again** |
+| `denied` | origin is blocked; no prompt will ever appear | **Try again** + **How to allow** |
+
+When the block is confirmed the checklist opens **platform-specific steps**
+automatically (iOS Settings / Android Chrome site settings / desktop
+site-settings panel). A blocked row keeps **both** buttons, because retrying is
+still worth offering: the player may have already unblocked the site in their
+settings without reloading, and in several browsers a dismissal (as opposed to a
+hard block) is cleared by asking again. Fixing it in settings fires `change`, so
+the row goes green on its own and the pair collapses back to *Check again*.
+
+*Unsupported* (an insecure origin, no camera hardware, an in-app browser) offers
+the guide alone — there is no API on that origin, so another request cannot
+change anything.
+
+*Join the hunt* stays locked until both are granted — but **"Join anyway" stays
+available**, so a device that will never grant one of them (no camera hardware, a
+policy-blocked device, an in-app browser that withholds prompts) is not trapped.
+
 `joinGame` resolves pasted input in this order, so a creator's link and a
 hunt key behave identically in the join box:
 
@@ -280,9 +348,21 @@ camera opens on its own and runs a `meeting` phase (`HuntARCamera`):
   nothing. The stop is still walked to: inside its radius, its key presented and
   its questions answered is what completes it.
 
-"Start walking" (or backing out of the camera) ends the meeting; it is shown
+"Begin Hunt" (or backing out of the camera) ends the meeting; it is shown
 once per round, and reopening the camera before dismissing it greets the team
-again. Everything after it is unchanged: each stop asks its own questions and
+again. **Begin Hunt is held back for the first 10 seconds**
+(`START_WALK_DELAY_S`): the meeting is the one screen that explains the whole
+hunt at once — greeting, clue, the key just handed over and how to use it — and
+that button is the fastest thing on it to hit. While it is held the label
+carries a live countdown and the helper text says why, because a silently
+disabled control reads as a broken one rather than as a deliberate wait. The
+moment it unlocks, a one-shot pop and ring mark the change and a slow glow
+repeats until it is clicked; the glow animates `box-shadow` rather than
+`transform`, so the button never moves under a thumb, and the whole thing is
+dropped under `prefers-reduced-motion`. Backing out without dismissing it
+restarts the full delay on the next open.
+
+Everything after it is unchanged: each stop asks its own questions and
 the reveal hands over the next location's clue, character and key, until the
 final stop, whose questions are followed by the End-of-Hunt Character playing
 its clip and *Finish hunt* opening the congratulations screen.
