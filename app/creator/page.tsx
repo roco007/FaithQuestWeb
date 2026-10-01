@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, Suspense, type ChangeEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, ChevronUp, ChevronDown, Trash2, Pencil, Rocket, Share2, Wand2, Copy, Check, Link2, Download, Upload, Sparkles } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Trash2, Pencil, Rocket, Share2, Wand2, Copy, Link2, Download, Upload, Sparkles } from 'lucide-react';
 import { useHunt } from '../../context/HuntContext';
 import { useGame } from '../../context/GameContext';
 import type { HuntCharacter, HuntGame, HuntGameDraft } from '../../types/hunt';
@@ -10,7 +10,8 @@ import type { CharacterAsset } from '../../services/characterAssets';
 import { loadCharacterAssets } from '../../services/characterAssets';
 import { CharacterEditorModal } from '../../components/CharacterEditorModal';
 import { Modal } from '../../components/Modal';
-import { buildGameJoinUrl, buildGameShareMessage, currentOrigin } from '../../services/shareGame';
+import { buildGameJoinUrl, buildGameShareMessage, currentOrigin, getShareSubject } from '../../services/shareGame';
+import { ShareLink } from '../../components/ShareLink';
 import { downloadHuntGame, parseHuntGameJson, buildHuntOrder, type ImportedHunt } from '../../services/huntFile';
 import { triggerHaptic } from '../../utils/sound';
 
@@ -22,6 +23,17 @@ const GLYPHS: Record<HuntCharacter['characterType'], string> = {
   flame: '🔥',
   oracle: '🔮',
 };
+
+/**
+ * One line describing what is being shared, shown under the hunt's title in
+ * the share sheet. Deliberately short: these apps already prefix the message
+ * with their own "shared a link" chrome, and the hunt number plus a place count
+ * is what a recipient needs to recognise the invite before opening it.
+ */
+function shareSummary(game: HuntGame): string {
+  const places = game.characters.length;
+  return `Join hunt ${game.id} on FaithQuest — ${places} location${places === 1 ? '' : 's'}, your own shuffled route.`;
+}
 
 /** Game-creator editor: metadata + an ordered list of locations, each carrying
  *  its own hint, character, questions and key. Publishing assigns the hunt
@@ -61,7 +73,6 @@ function CreatorEditor() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [publishedGame, setPublishedGame] = useState<HuntGame | null>(null);
-  const [copied, setCopied] = useState(false);
   /** Hunt loaded from an uploaded JSON file; feeds the draft's hunt number. */
   const [importedGame, setImportedGame] = useState<ImportedHunt | null>(null);
   /** Success feedback for the JSON import (failures go to `error`). */
@@ -235,8 +246,7 @@ function CreatorEditor() {
     if (!publishedGame) return;
     try {
       await navigator.clipboard.writeText(buildGameShareMessage(publishedGame, currentOrigin()));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      void triggerHaptic('success');
     } catch {
       // Clipboard can be blocked; the share text stays selectable on screen.
       setError('Copy was blocked by the browser — select the code manually.');
@@ -244,20 +254,10 @@ function CreatorEditor() {
   };
 
   /**
-   * Copies just the join link. This is the artefact players actually want: it
-   * carries the hunt with it, so opening it lands them on the Hunts screen with
-   * a "do you want to join?" prompt — no pasting, no backend.
+   * The join link is copied from the share sheet in the publish panel, which
+   * also hands it to WhatsApp, Messages, Facebook, X and Email directly -
+   * there is no separate "Copy invite link" button any more.
    */
-  const handleCopyLink = async () => {
-    if (!publishedGame) return;
-    try {
-      await navigator.clipboard.writeText(buildGameJoinUrl(publishedGame, currentOrigin()));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError('Copy was blocked by the browser — select the link manually.');
-    }
-  };
 
   /** Invite link shown in the publish sheet, rebuilt on every render so it always
    *  matches the origin the creator is actually browsing on. */
@@ -587,19 +587,25 @@ function CreatorEditor() {
               treasure, the whole list is shuffled and the last one here is where that hunt ends.
             </p>
 
-            <label className="fieldLabel" htmlFor="share-link">
+            <div className="fieldLabel">
               <Link2 size={12} /> Invite link
-            </label>
-            <div id="share-link" className="shareLink mono" title={joinUrl}>
-              {joinUrl}
             </div>
+            <ShareLink
+              url={joinUrl}
+              title={publishedGame.title}
+              text={shareSummary(publishedGame)}
+              subject={getShareSubject(publishedGame)}
+              onCopyBlocked={() =>
+                setError(
+                  'Copy was blocked by the browser — the link above is still selectable.'
+                )
+              }
+            />
 
             <div className="shareCode mono">{publishedGame.id}</div>
             <div className="shareActions">
-              <button type="button" className="btnAmber" onClick={handleCopyLink}>
-                {copied ? <Check size={16} /> : <Link2 size={16} />}
-                {copied ? 'Copied!' : 'Copy invite link'}
-              </button>
+              {/* Copying the link now lives in the share sheet above, which
+                  owns its own "Copied" state. */}
               <button type="button" className="btnGhost" onClick={handleCopyShare}>
                 <Copy size={16} />
                 Copy full message
