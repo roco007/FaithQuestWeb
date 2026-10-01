@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Gamepad2, Plus, LogIn, LogOut, Play, Trash2, Share2, MapPin, Check, Link2 } from 'lucide-react';
+import { Gamepad2, Plus, LogIn, LogOut, Play, Trash2, Share2, MapPin, Check, Link2, ShieldCheck } from 'lucide-react';
 import { useHunt } from '../../context/HuntContext';
 import { useGame } from '../../context/GameContext';
 import { evaluateProximity } from '../../utils/geo';
 import { buildGameShareMessage, currentOrigin } from '../../services/shareGame';
 import { decodeGameShareCode, encodeGameShareCode } from '../../services/gameRepository';
 import { HuntPlay } from '../../components/HuntPlay';
+import { JoinPreflight } from '../../components/JoinPreflight';
 import { KeyInHand } from '../../components/KeyInHand';
 import { Modal } from '../../components/Modal';
 import type { HuntGame } from '../../types/hunt';
@@ -38,6 +39,14 @@ export default function GamesPage() {
    */
   const [invited, setInvited] = useState<HuntGame | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  /**
+   * The device-permission checklist, shown between accepting an invite and
+   * joining it. Precise location and camera are the two things a hunt cannot
+   * run without, and both fail quietly once refused — a hunt joined without
+   * them looks fine until the map never notices the player arriving and the AR
+   * view never produces a frame.
+   */
+  const [preflight, setPreflight] = useState(false);
 
   /** Consumes the invite fragment exactly once, on arrival. */
   useEffect(() => {
@@ -62,7 +71,8 @@ export default function GamesPage() {
     return () => window.removeEventListener('hashchange', readInvite);
   }, []);
 
-  /** Adds the invited player to the hunt — only ever called after confirmation.
+  /** Adds the invited player to the hunt — only ever called after the player has
+   *  confirmed *and* passed the device-permission checklist (or chosen to skip it).
    *  `invited` is an already-decoded game, so it is re-encoded through the same
    *  path the paste box uses rather than re-encoding the URL-escaped fragment
    *  (which would double-escape it and fail to decode). */
@@ -73,6 +83,7 @@ export default function GamesPage() {
     try {
       await joinGame(encodeGameShareCode(invited));
       setInvited(null);
+      setPreflight(false);
       setPlaying(true);
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : 'Could not join that hunt.');
@@ -80,6 +91,13 @@ export default function GamesPage() {
       setJoining(false);
     }
   }, [invited, joinGame]);
+
+  /** Dismisses the invite from any step, checklist included. */
+  const closeInvite = useCallback(() => {
+    setInvited(null);
+    setInviteError(null);
+    setPreflight(false);
+  }, []);
 
   /** True when the invite is the hunt already in progress — no switch needed. */
   const inviteIsActive = Boolean(invited && activeGame && invited.id === activeGame.id);
@@ -320,18 +338,41 @@ export default function GamesPage() {
           Opened when a player's URL carries `#join=…`. Joining is never
           automatic: the player confirms first, so a link that is merely opened
           (previewed in a chat app, opened on a borrowed phone) cannot silently
-          replace the hunt they are already playing. */}
+          replace the hunt they are already playing.
+
+          Confirming does not join either — it advances to the device-permission
+          checklist, and only the checklist's own button calls `joinGame`. */}
       <Modal
         open={invited !== null}
-        onClose={() => {
-          setInvited(null);
-          setInviteError(null);
-        }}
-        title="You've been invited to a hunt"
-        icon={<Link2 size={18} />}
+        onClose={closeInvite}
+        title={preflight ? 'Before you start' : "You've been invited to a hunt"}
+        icon={preflight ? <ShieldCheck size={18} /> : <Link2 size={18} />}
         accentColor="var(--amber)"
       >
-        {invited && (
+        {invited && preflight && (
+          <>
+            <p className="shareLead">
+              <strong>{invited.creatorName}</strong>&rsquo;s &ldquo;{invited.title}&rdquo; is
+              ready for you. Two quick device checks first.
+            </p>
+            {/* Shown here too: the checklist is the step that finally calls
+                `joinGame`, so a rejected hunt has to report itself from here —
+                otherwise the failure is silent and the buttons just stop
+                responding. */}
+            {inviteError && (
+              <div className="banner bannerWarn" role="alert">
+                {inviteError}
+              </div>
+            )}
+            <JoinPreflight
+              onJoin={() => void acceptInvite()}
+              onCancel={() => setPreflight(false)}
+              joining={joining}
+            />
+          </>
+        )}
+
+        {invited && !preflight && (
           <>
             <p className="shareLead">
               <strong>{invited.creatorName}</strong> invites you to join &ldquo;
@@ -376,20 +417,13 @@ export default function GamesPage() {
                   <button
                     type="button"
                     className="btnAmber"
-                    onClick={() => void acceptInvite()}
+                    onClick={() => setPreflight(true)}
                     disabled={joining}
                   >
                     <LogIn size={16} />
-                    {joining ? 'Joining…' : 'Yes, join this hunt'}
+                    Yes, join this hunt
                   </button>
-                  <button
-                    type="button"
-                    className="btnGhost"
-                    onClick={() => {
-                      setInvited(null);
-                      setInviteError(null);
-                    }}
-                  >
+                  <button type="button" className="btnGhost" onClick={closeInvite}>
                     No, thanks
                   </button>
                 </div>

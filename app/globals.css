@@ -242,9 +242,16 @@ select:focus-visible {
   transform: translateY(1px);
 }
 
-.btnPrimary:disabled {
+.btnPrimary:disabled,
+.btnAmber:disabled,
+.btnGreen:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.btnAmber:disabled:hover,
+.btnGreen:disabled:hover {
+  filter: none;
 }
 
 .btnGhost {
@@ -450,6 +457,7 @@ select:focus-visible {
     transform: scale(0.6);
     opacity: 0.6;
   }
+
   100% {
     transform: scale(2.1);
     opacity: 0;
@@ -551,7 +559,7 @@ select:focus-visible {
   pointer-events: none;
 }
 
-.questOverlayTop > * {
+.questOverlayTop>* {
   pointer-events: auto;
 }
 
@@ -564,7 +572,7 @@ select:focus-visible {
   pointer-events: none;
 }
 
-.questOverlayBottom > * {
+.questOverlayBottom>* {
   pointer-events: auto;
 }
 
@@ -803,10 +811,12 @@ select:focus-visible {
 }
 
 @keyframes hud-glow {
+
   0%,
   100% {
     transform: scale(1);
   }
+
   50% {
     transform: scale(1.03);
   }
@@ -864,6 +874,7 @@ select:focus-visible {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -1404,7 +1415,7 @@ select:focus-visible {
   margin-top: 4px;
 }
 
-.modalActions > * {
+.modalActions>* {
   flex: 1;
 }
 
@@ -1449,7 +1460,7 @@ select:focus-visible {
   flex-wrap: wrap;
 }
 
-.shareActions > * {
+.shareActions>* {
   flex: 1;
 }
 
@@ -2768,6 +2779,270 @@ select:focus-visible {
   line-height: 1.45;
 }
 
+/* --- Join pre-flight: device permission checklist ------------------------ */
+
+.permList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.permRow {
+  display: grid;
+  /* icon | copy | button — the button sits at the end of the row on desktop
+     and drops to its own full-width line on a phone (see the media query). */
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 11px;
+  padding: 12px 13px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(30, 41, 59, 0.55);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+/* Narrow phones cannot fit icon + copy + buttons on one line without squeezing
+   the label until it wraps under its own status pill. */
+@media (max-width: 520px) {
+  .permRow {
+    grid-template-columns: auto 1fr;
+  }
+
+  .permRowActions {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  /* Side by side still, just sharing the full width instead of the copy's. */
+  .permRowActions .permBtn {
+    flex: 1;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+.permRowTodo {
+  border-color: rgba(56, 189, 248, 0.28);
+  background: rgba(56, 189, 248, 0.05);
+}
+
+.permRowOk {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.07);
+}
+
+.permRowIcon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--sky);
+}
+
+.permRowOk .permRowIcon {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--green);
+}
+
+.permRowMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.permRowHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.permRowLabel {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.permRowBlurb {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.permRowOk .permRowBlurb {
+  color: var(--text-muted);
+}
+
+.permPill {
+  /* Pinned to the row's trailing edge rather than left to wrap under a long
+     label, so the badge sits in the same place on every row at any width. */
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.permPillOk {
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #6ee7b7;
+}
+
+.permPillPending {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #7dd3fc;
+}
+
+.permPillBad {
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+}
+
+/* Holds the row's one or two actions. Kept as a group so a row can offer both
+   "Try again" and "How to allow" without either changing the grid it sits in. */
+.permRowActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.permBtn {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 9px 14px;
+  border-radius: 11px;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--sky);
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.permBtn:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.permBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.permBtnDone {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+}
+
+/* The button that opens the unblock steps. Amber rather than sky so it reads
+   as "do this instead" next to the primary flow, not as another request. */
+.permBtnHelp {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--amber-light);
+}
+
+/* Nested under its row so the eye keeps the pairing, and inset to line up with
+   the row's text column rather than floating loose. */
+.permHelpWrap {
+  margin-top: -4px;
+}
+
+.permHelp {
+  padding: 11px 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.09);
+}
+
+.permHelpTitle {
+  margin: 0 0 6px;
+  color: var(--amber-light);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.permHelpList {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.permHelpList li+li {
+  margin-top: 4px;
+}
+
+.permSpin {
+  animation: permSpin 0.9s linear infinite;
+}
+
+@keyframes permSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The escape hatch, kept deliberately quiet: it must not compete with
+   "Join the hunt", only reassure a player who cannot grant everything. */
+.preflightSkip {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.preflightSkipNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.preflightSkipBtn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.preflightSkipBtn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.preflightSkipBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .locSpin {
   animation: loc-spin 0.9s linear infinite;
 }
@@ -3078,10 +3353,124 @@ select:focus-visible {
 }
 
 .arRevealContinue {
+  position: relative;
   background: var(--green);
   border: none;
   color: #06281d;
   font-weight: 900;
+}
+
+/* --- Opening meeting: "Begin Hunt" is held back, then called out -------- */
+
+/* Waiting: visibly inert, but not so faded that it disappears — it is the
+   thing the player is being asked to read, not to click yet. */
+.arRevealContinueWaiting {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: saturate(0.7);
+}
+
+.arCountdown {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(6, 40, 29, 0.22);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+
+/* Ready: the pop marks the exact unlock, then only the glow repeats.
+   Both are deliberately transform-free once the pop is over — the button has to
+   stop moving, because it sits under a player's thumb on a phone and a control
+   that never settles is a control whose tap is not guaranteed to land. The glow
+   animates `box-shadow`, which draws the eye without ever moving the hit area. */
+@keyframes arStartPop {
+  0% {
+    transform: scale(0.92);
+  }
+
+  45% {
+    transform: scale(1.07);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes arStartGlow {
+
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(16, 185, 129, 0.65),
+      0 0 18px 0 rgba(16, 185, 129, 0.4);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 14px rgba(16, 185, 129, 0),
+      0 0 34px 8px rgba(16, 185, 129, 0.6);
+  }
+}
+
+@keyframes arStartBurst {
+  0% {
+    transform: scale(1);
+    opacity: 0.95;
+  }
+
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@keyframes arChevronNudge {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  50% {
+    transform: translateX(5px);
+  }
+}
+
+.arRevealContinueReady {
+  animation:
+    arStartPop 0.55s ease-out 1,
+    arStartGlow 1.9s ease-in-out 0.55s infinite;
+}
+
+.arRevealContinueReady::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid rgba(16, 185, 129, 0.9);
+  pointer-events: none;
+  animation: arStartBurst 0.9s ease-out 1;
+}
+
+.arRevealContinueReady svg {
+  animation: arChevronNudge 1.9s ease-in-out infinite;
+}
+
+/* The unlock is a visual flourish; it carries no information the countdown text
+   does not already state, so honour a reduced-motion preference outright. */
+@media (prefers-reduced-motion: reduce) {
+
+  .arRevealContinueReady,
+  .arRevealContinueReady svg {
+    animation: none;
+  }
+
+  .arRevealContinueReady::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 /* --- Camera failure gate -------------------------------------------------- */
@@ -3283,4 +3672,3 @@ select:focus-visible {
   border-radius: 14px;
   padding: 12px 16px;
 }
-
