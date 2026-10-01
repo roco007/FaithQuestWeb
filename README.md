@@ -51,7 +51,7 @@ npm test
 | Persistence | `AsyncStorage`               | `localStorage` (`utils/webStorage.ts`)              |
 | Haptics     | `expo-haptics`               | `navigator.vibrate` (progressive enhancement)       |
 | Audio cues  | Native sound pack            | Web Audio API synthesized tones                     |
-| Share sheet | `Share` API                  | Clipboard (`navigator.clipboard`)                   |
+| Share sheet | `Share` API                  | Deep links per app + `navigator.share` where available |
 | Modals      | `<Modal>`                    | Accessible dialogs (Esc, backdrop click, scroll lock) |
 
 The `ar/` Three.js AR camera view is ported as `components/HuntARCamera.tsx`:
@@ -110,6 +110,69 @@ carries the whole hunt itself — base64 of the game payload, appended as
 `/games#join=…`. The fragment (not the query string) is deliberate: it is never
 sent to the server nor leaked through `Referer`, which matters for a link passed
 around messaging apps.
+
+### The share sheet
+
+`components/ShareLink.tsx` is the sheet both the Creator's publish panel and the
+**Share** button on each hunt card open. It is the shape people already know
+from YouTube and iOS: a row of app icons you tap, with the link underneath for
+copying by hand.
+
+| Target     | How it is reached                                       |
+| ---------- | ------------------------------------------------------- |
+| WhatsApp   | `wa.me/?text=` — title, summary and link in the body      |
+| Messages   | `sms:?&body=` — same body                                |
+| Facebook   | `sharer/sharer.php?u=` — the link only, its sharer adds  |
+| X          | `intent/tweet?text=…&url=…` — link passed separately     |
+| Reddit     | `reddit.com/submit?url=…&title=…`                        |
+| LinkedIn   | `linkedin.com/sharing/share-offsite/?url=` — link only   |
+| Pinterest  | `pin/create/button/?url=…&description=…`                 |
+| Email      | `mailto:?subject=…&body=`                                 |
+| **More**   | `navigator.share` — the OS share sheet                   |
+
+Every target builds its own URL, because no two platforms want the same
+arguments: Facebook's sharer takes the link alone, X and Reddit take the link
+and the message separately (and would print the link twice if it were also
+inlined in the text), and LinkedIn's share-offsite endpoint titles the post
+itself. **Pinterest is the weakest fit here** — its Pin Creator fetches the URL
+to build a preview card, and because the hunt lives in the fragment (never sent
+to a server) it arrives as a bare app shell, so the pin and description post
+fine but the image will be blank.
+
+Glyphs live in `components/shareBrandGlyphs.tsx`. WhatsApp, Facebook, X, Reddit,
+Pinterest and LinkedIn use the official outlines from
+[Simple Icons](https://simpleicons.org) (CC0-1.0 — public domain, no attribution
+required), each on its own service's colour, which is how the brand guidelines
+intend them to be used. LinkedIn is taken from Simple Icons **v11**: it is the
+one mark *removed* from the set after v11, so current releases ship no
+`linkedin` slug at all. The outline is unchanged and still CC0, and this is the
+ordinary share-button use — the mark, on LinkedIn's own colour, as the disc for
+the tap that opens LinkedIn. **Messages** and **Email** are deliberately generic
+shapes drawn for this app rather than brand marks: "text message" and "email"
+have no canonical logo that isn't also someone else's (Apple Messages, Google
+Messages, Messenger and SMS are four different marks for one tap, and a web page
+cannot know which is installed). The same reason X is used rather than the
+Twitter bird, which it replaced — a retired logo for a destination that is
+still `twitter.com` would just be wrong.
+
+Two details are deliberate:
+
+- **X gets the link through `url=`, not inlined.** Inlining it as well prints
+  the same link twice in the tweet.
+- **The row is deep links, not `navigator.share`.** A tap on WhatsApp should
+  reach WhatsApp whether or not the device exposes a share sheet, and the OS
+  one cannot be themed or tested. "More" still hands off to it, because it is
+  the only way to reach apps no static list can enumerate — and it appears only
+  when `navigator.share` exists, resolved after mount so the prerender and the
+  client render the same tree.
+
+Web targets open a centred popup; `mailto:`/`sms:` navigate in place, because a
+scheme URL handed to `window.open` is dropped by every browser. A blocked popup
+falls back to the same tab. `noopener` is deliberately absent from the popup's
+feature string — it makes browsers return `null` even on success, which would
+read as "blocked" and bounce the player out of the app they were sharing into;
+the opener is nulled by hand instead. The copy field stays selectable
+throughout, so a blocked clipboard is a slower route and never a dead end.
 
 Opening that link lands the player on `/games` with a confirmation dialog —
 **"You've been invited to a hunt"** — naming the creator, the title and the

@@ -1,16 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Gamepad2, Plus, LogIn, LogOut, Play, Trash2, Share2, MapPin, Check, Link2, ShieldCheck } from 'lucide-react';
+import { Gamepad2, Plus, LogIn, LogOut, Play, Trash2, Share2, MapPin, Link2, ShieldCheck } from 'lucide-react';
 import { useHunt } from '../../context/HuntContext';
 import { useGame } from '../../context/GameContext';
 import { evaluateProximity } from '../../utils/geo';
-import { buildGameShareMessage, currentOrigin } from '../../services/shareGame';
+import { buildGameJoinUrl, buildGameShareMessage, currentOrigin, getShareSubject } from '../../services/shareGame';
 import { decodeGameShareCode, encodeGameShareCode } from '../../services/gameRepository';
 import { HuntPlay } from '../../components/HuntPlay';
 import { JoinPreflight } from '../../components/JoinPreflight';
 import { KeyInHand } from '../../components/KeyInHand';
 import { Modal } from '../../components/Modal';
+import { ShareLink } from '../../components/ShareLink';
 import type { HuntGame } from '../../types/hunt';
 
 export default function GamesPage() {
@@ -31,7 +32,11 @@ export default function GamesPage() {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [shared, setShared] = useState<string | null>(null);
+  /**
+   * Hunt whose share sheet is open, from a card's Share button. Holding the
+   * game rather than its id keeps the sheet's link stable while it is open.
+   */
+  const [sharing, setSharing] = useState<HuntGame | null>(null);
   /**
    * Hunt carried by an incoming `#join=…` deep link. The player is asked before
    * anything is saved, so opening someone's link never silently replaces the
@@ -145,20 +150,8 @@ export default function GamesPage() {
     });
   };
 
-  const handleShare = async (id: string) => {
-    const game = createdGames.find((g) => g.id === id);
-    if (!game) return;
-
-    setShared(id);
-    try {
-      // Clipboard is the web-native equivalent of the native share sheet.
-      await navigator.clipboard.writeText(buildGameShareMessage(game, currentOrigin()));
-    } catch {
-      // Clipboard can be blocked (insecure origin / denied permission). The
-      // share code remains copyable in the Creator's share panel.
-    }
-    setTimeout(() => setShared(null), 2000);
-  };
+  /** The deep join link for the hunt whose share sheet is open. */
+  const shareUrl = sharing ? buildGameJoinUrl(sharing, currentOrigin()) : '';
 
   if (playing && activeGame) {
     return <HuntPlay onExit={() => setPlaying(false)} />;
@@ -313,11 +306,11 @@ export default function GamesPage() {
                   <button
                     type="button"
                     className="btnGhost"
-                    onClick={() => handleShare(game.id)}
-                    title="Copy share code to clipboard"
+                    onClick={() => setSharing(game)}
+                    title="Share this hunt"
                   >
-                    {shared === game.id ? <Check size={15} /> : <Share2 size={15} />}
-                    {shared === game.id ? 'Copied' : 'Share'}
+                    <Share2 size={15} />
+                    Share
                   </button>
                   <button
                     type="button"
@@ -333,6 +326,39 @@ export default function GamesPage() {
           ))}
         </div>
       )}
+
+      {/* --- Share a hunt ---------------------------------------------------
+          The same sheet the Creator's publish panel uses. A creator sharing
+          their own hunt from this list is sharing it with players, so it goes
+          to the apps players actually use rather than only to the clipboard. */}
+      <Modal
+        open={sharing !== null}
+        onClose={() => setSharing(null)}
+        title={sharing ? `Share "${sharing.title}"` : 'Share'}
+        icon={<Share2 size={18} />}
+        accentColor="var(--sky)"
+      >
+        {sharing && (
+          <>
+            <p className="shareLead">
+              <strong>{sharing.creatorName}</strong>&rsquo;s hunt {sharing.id} &mdash;{' '}
+              {sharing.characters.length} location
+              {sharing.characters.length === 1 ? '' : 's'}, with every team dealt its own
+              order.
+            </p>
+            <ShareLink
+              url={shareUrl}
+              title={sharing.title}
+              text={`Join hunt ${sharing.id} on FaithQuest - ${sharing.characters.length} location${sharing.characters.length === 1 ? '' : 's'}, your own shuffled route.`}
+              subject={getShareSubject(sharing)}
+            />
+            <details className="shareDetails">
+              <summary>Show full share text</summary>
+              <pre className="sharePreview mono">{buildGameShareMessage(sharing, currentOrigin())}</pre>
+            </details>
+          </>
+        )}
+      </Modal>
 
       {/* --- Invite from a deep link ---------------------------------------
           Opened when a player's URL carries `#join=…`. Joining is never
